@@ -4,6 +4,9 @@
 #include <time.h>
 #include "debuggrid.h"
 
+#define TRUE 1
+#define FALSE 0
+
 void board_init(int** grid, int size);
 
 int main(char argc, char** argv)
@@ -15,14 +18,14 @@ int main(char argc, char** argv)
 	}
 	MPI_Init(NULL, NULL);
 	int rank, worldsize;
-
-	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-	MPI_Comm_size(MPI_COMM_WORLD, &worldsize);
 	
-	int n = strtol(argv[1], NULL, 10);			// Grid size
-	int t = strtol(argv[2], NULL, 10);			// Tile size
-	float  c = atof(argv[3]);			// Terminating threshold
-	int max_iters = strtol(argv[4], NULL, 10);		// Max iterations
+	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+	MPI_Comm_size(MPI_COMM_WORLD, &worldsize);	
+
+	int n 		= strtol(argv[1], NULL, 10);			// Grid size
+	int t 		= strtol(argv[2], NULL, 10);			// Tile size
+	float  c 	= atof(argv[3]);			// Terminating threshold
+	int max_iters 	= strtol(argv[4], NULL, 10);		// Max iterations
 	//int grid[n][n];
 	int **grid = (int **) malloc (n * sizeof(int *));
 	for (int i = 0; i < n; i++)
@@ -32,7 +35,33 @@ int main(char argc, char** argv)
 	//grid = malloc(n * n * sizeof(grid));	
 
 	printf("Initializing board of size %d with tile size %d, threshold %f and max iterations %d\n", n, t, c, max_iters);
-	board_init(grid, n);
+
+	if (rank == 0)
+	{
+		board_init(grid, n);		
+	}
+	
+	// Init the local 2D array for this process
+	int subgridsize = n / worldsize;
+	int **localgrid = (int **) malloc (subgridsize * sizeof(int));	
+	for (int i = 0; i < subgridsize; i++)
+	{
+		localgrid[i] = (int *)malloc(subgridsize * sizeof(int));
+	}
+
+	// Create the MPI datatype for the subgrid
+	int globalsizes[2] 	= { n, n };
+	int subgridsizes[2]	= { subgridsize, subgridsize };
+	int startindices[2] 	= { 0, 0 };
+	
+	MPI_Datatype type, subgridtype;
+	MPI_Type_create_subarray(2, globalsizes, subgridsizes, startindices, MPI_ORDER_C, MPI_INT, &type);
+	MPI_Type_create_resized(type, 0, subgridsize * sizeof(int), &subgridtype);
+	MPI_Type_commit(&subgridtype);
+
+	// Send values to process subgrids
+	
+
 	//print_grid(grid, n);	
 	MPI_Finalize();
 }
