@@ -1,6 +1,6 @@
 #ifndef DEBUGGRID_H
 #define DEBUGGRID_H
 
-void print_grid(char** grid, int size);
+void print_grid(int** grid, int size);
 
 #endif
