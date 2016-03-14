@@ -223,27 +223,7 @@ int main(char argc, char** argv)
 				break;
 			} 	
 			curriter++;
-		}
-		
-		// Print results array
-		if (rank == 0)
-		{
-			// Assemble the final array
-			for (int i = 0; i < worldsize; i++)
-			{
-				if (i < procswithextrarows)
-				{
-					//MPI_Recv
-				}
-			}
-		}
-		else
-		{
-			for (int i = 0; i < mynumrows; i++)
-			{
-				
-			}
-		}
+		}	
 	}
 	else
 	{
@@ -253,7 +233,11 @@ int main(char argc, char** argv)
 			setemptycells(grid, n, n, 1);
 			solveblueturn(grid, NULL, n, n);
 			setemptycells(grid, n, n, 2);
-			
+			if (tilespastthreshold(grid, n, n, numtoexceedc, t, numtiles) == 1)
+			{
+				break;
+			}
+			curriter++;	
 		}	
 	}
 	MPI_Finalize();	
@@ -349,6 +333,7 @@ int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int 
 	int tilenum = 0;				
 	int* numred = (int *) malloc (numtiles * sizeof(int));
 	int* numblue = (int *) malloc (numtiles * sizeof(int));
+	int tilesperrow = width / tilesize;
 	
 	// Zero out arrays - just in case to get rid of old values
 	for (int i = 0; i < numtiles; i++)
@@ -361,7 +346,9 @@ int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int 
 		for (int y = 0; y < width; y++)
 		{
 			//tilenum =  (y / tilesize) + ((x / tilesize) * tilesize) + ((x / tilesize) * tilesize);// + (x / tilesize);	
-			tilenum = ((x / tilesize) * tilesize) + (y / tilesize);
+			//tilenum = (y / tilesize) + (x - x % tilesize) * (x / tilesize);
+			//tilenum = tilesize * (y / tilesize) + (x / tilesize);
+			tilenum = (x / tilesize) *  tilesperrow + (y / tilesize);
 			printf("t[%d]", tilenum);
 			if (grid[x][y] == 1)
 			{
