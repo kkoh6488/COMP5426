@@ -33,7 +33,7 @@ int main(char argc, char** argv)
 	int maxiters 		= strtol(argv[4], NULL, 10);			// Max iterations
 	int curriter 		= 0;						// Current iteration
 	int **grid;								// Master grid
-	int numtoexceedc	= (int)(n * c + 1);				// Cells to exceed the threshold
+	int numtoexceedc	= (int)(t * t * c + 1);				// Cells to exceed the threshold
 	int numtiles		= (n / t) * (n / t);
 
 	malloc2darray(&grid, n, n);
@@ -220,7 +220,6 @@ int main(char argc, char** argv)
 			}
 			if (tileResult[0] == 1)
 			{
-				printf("Exceeded c at it %d \n", curriter);
 				break;
 			} 	
 			curriter++;
@@ -347,14 +346,23 @@ void updatetoprow(int *toprow, int *tempbuffer, int size)
 // Check if a tiles in the given grid exceeds the threshold
 int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int tilesize, int numtiles)
 {
-	int tilenum;				
+	int tilenum = 0;				
 	int* numred = (int *) malloc (numtiles * sizeof(int));
 	int* numblue = (int *) malloc (numtiles * sizeof(int));
+	
+	// Zero out arrays - just in case to get rid of old values
+	for (int i = 0; i < numtiles; i++)
+	{
+		numred[i] = 0;
+		numblue[i] = 0;
+	}
 	for (int x = 0; x < height; x++)
 	{
 		for (int y = 0; y < width; y++)
 		{
-			tilenum =  (y / tilesize) + ((x / tilesize) * tilesize);					
+			//tilenum =  (y / tilesize) + ((x / tilesize) * tilesize) + ((x / tilesize) * tilesize);// + (x / tilesize);	
+			tilenum = ((x / tilesize) * tilesize) + (y / tilesize);
+			printf("t[%d]", tilenum);
 			if (grid[x][y] == 1)
 			{
 				numred[tilenum] += 1;
@@ -364,11 +372,14 @@ int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int 
 				numblue[tilenum] += 1;
 			}
 		}
+		printf("\n");
 	}
 	for (int i = 0; i < numtiles; i++)
 	{
+		printf("Num in tile %d (max %d) - red: %d, blue %d \n", i, maxtilecount, numred[i], numblue[i]);
 		if (numred[i] >= maxtilecount || numblue[i] >= maxtilecount)
 		{
+			printf("Exceeded at tile %d\n", i);
 			return 1;			
 		}
 	}
