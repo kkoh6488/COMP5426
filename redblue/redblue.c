@@ -11,6 +11,12 @@ void board_init(int** grid, int size);
 
 int malloc2darray(int ***array, int x, int y);
 
+void solveredturn(int **subgrid, int width, int height);
+
+void solveblueturn(int **subgrid, int width, int height);
+
+void setemptycells(int **subgrid, int width, int height); 
+
 int main(char argc, char** argv)
 {
 	if ((argc + 0) != 5)
@@ -48,9 +54,9 @@ int main(char argc, char** argv)
 	
 	// Init the local 2D array for this process
 	int subgridsize = n / worldsize;
-	int subgridsperproc = (n /  subgridsize) * (n / subgridsize)  / worldsize;		// The number of subgrids each process gets
+	//int subgridsperproc = (n /  worldsize);		// The number of subgrids each process gets
 
-	printf("subgrid size: %d, making local grid: %d \n", subgridsize, subgridsize * subgridsperproc);
+	//printf("subgrid size: %d, making local grid: %d \n", subgridsize, subgridsize * subgridsperproc);
 	//int **localgrid = (int **) malloc (subgridsize  *  sizeof(int) * subgridsperproc);	
 	//for (int i = 0; i < subgridsize * subgridsperproc; i++)
 	//{
@@ -58,7 +64,9 @@ int main(char argc, char** argv)
 	//}
 
 	int **localgrid;
-	malloc2darray(&localgrid, subgridsize, subgridsize); 
+
+	// Divide up grid by rows for red turn - ie width of the grid stays the same
+	malloc2darray(&localgrid, subgridsize, n); 
 
 	/*
 	for (int x = 0; x < subgridsize; x++)
@@ -72,20 +80,21 @@ int main(char argc, char** argv)
 
 	// Create the MPI datatype for the subgrid
 	int globalsizes[2] 	= { n, n };
-	int subgridsizes[2]	= { subgridsize, subgridsize };
+	int subgridsizes[2]	= { subgridsize, n };
 	int startindices[2] 	= { 0, 0 };
 
-	printf("Datatype array sizes: %d, %d, %d \n", sizeof(globalsizes), sizeof(subgridsizes), sizeof(startindices));
-	
+	//printf("Datatype array sizes: %d, %d, %d \n", sizeof(globalsizes), sizeof(subgridsizes), sizeof(startindices));
+	printf("Subgrid sizes: %d %d \n", n, subgridsize);	
+
 	MPI_Datatype type, subgridtype;
 	MPI_Type_create_subarray(2, globalsizes, subgridsizes, startindices, MPI_ORDER_C, MPI_INT, &type);
-	MPI_Type_create_resized(type, 0, subgridsize * sizeof(int), &subgridtype);
+	MPI_Type_create_resized(type, 0, n  * subgridsize *  sizeof(int), &subgridtype);
 	MPI_Type_commit(&subgridtype);
 
 	// Send values to process subgrids;	
 	int sendcounts[worldsize];					// The number of SENDTYPE items to send
 	int displacements[worldsize];					// The displacement of an item from sendbuf
-	printf("Subgrids per proc: %d \n", subgridsperproc);
+	//printf("Subgrids per proc: %d \n", subgridsperproc);
 
 	int *gridptr = NULL;
 	if (rank == 0)
@@ -94,16 +103,19 @@ int main(char argc, char** argv)
 		int displ = 0;
 		for (int i = 0; i < worldsize; i++)
 		{
-			sendcounts[i] = subgridsperproc;	
+			sendcounts[i] = 1;	
 			displacements[i] = displ;
-			displ += subgridsperproc;
+			displ += 1;
 		}
+		//displ += ((n / subgridsize) - 1) * (n / worldsize);
 	}	
 	
 	printf("Localgrid size: %d, %d \n", sizeof(localgrid), sizeof(localgrid[0][0]));
-	printf("Receiving %d items \n", subgridsperproc * (subgridsize * subgridsize));
+	printf("Receiving %d items \n",  subgridsize * n);
 
-	MPI_Scatterv(gridptr, sendcounts, displacements, subgridtype, &localgrid[0][0], subgridsperproc * (subgridsize * subgridsize), MPI_INT, 0, MPI_COMM_WORLD);
+	MPI_Scatterv(gridptr, sendcounts, displacements, subgridtype, &localgrid[0][0], n *  subgridsize, MPI_INT, 0, MPI_COMM_WORLD);
+
+	solveredturn(localgrid, n, subgridsize);
 
 	for (int prank = 0; prank < worldsize; prank++)
 	{
@@ -112,7 +124,7 @@ int main(char argc, char** argv)
 			printf("Local process rank %d \n", rank);
 			for (int x = 0; x < subgridsize; x++)
 			{
-				for (int y = 0; y < subgridsize; y++)
+				for (int y = 0; y < n;  y++)
 				{
 					printf("%d ", localgrid[x][y]);
 				}
@@ -123,6 +135,87 @@ int main(char argc, char** argv)
 
 	//print_grid(grid, n);	
 	MPI_Finalize();
+}
+
+void solveredturn(int **subgrid, int width, int height)
+{
+	for (int x = 0; x < height; x++)
+	{
+		for (int y = 0; y < width; y++)
+		{
+			if (subgrid[x][y] == 1)
+			{
+				if (y < width - 1)			// If this isn't the edge cell
+				{
+					if (subgrid[x][y + 1] == 0)	// If the cell to the right is white
+					{
+						subgrid[x][y + 1] = 3;
+						subgrid[x][y] = 4; 	
+					}
+				}
+				else
+				{
+					if (subgrid[x][0] == 0)
+					{
+						subgrid[x][0] = 3;	// Mark the new cell
+						subgrid[x][y] = 4;	// Show this cell was left this turn
+					}
+				}	
+			}
+		} 
+	}	
+}
+
+
+void solveblueturn(int **subgrid, int width, int height)
+{
+	for (int x = 0; x < width; x++)
+	{
+		for (int y = 0; y < height; y++)
+		{
+			if (subgrid[x][y] == 2)
+			{
+				if (x < height - 1)			// If this isn't the edge cell
+				{
+					if (subgrid[x + 1][y] == 0)	// If the cell below is white
+					{
+						subgrid[x + 1][y] = 3;
+						subgrid[x][y] = 4; 	
+					}
+				}
+				else
+				{
+					if (subgrid[0][y] == 0)		// Check the top row cell for wraparound
+					{
+						subgrid[0][y] = 3;
+						subgrid[x][y] = 4;
+					}
+				}	
+			}
+		} 
+	}
+}
+
+// Check if a given tile exceeds the threshold
+void checktiles(int **tile, float threshold)
+{
+	
+}
+
+// Takes the subgrid and changes any "moved" values (ie 3 and 4) and turns it into a red or blue (ie 1 or 2).
+// Done at the end of each half-turn.
+void setemptycells(int **subgrid, int height, int width)
+{
+	for (int x = 0; x < width; x++)
+	{
+		for (int y = 0; y < height; y++)
+		{
+			if (subgrid[x][y] == 3 || subgrid[x][y] == 4)
+			{
+				subgrid[x][y] = 0;
+			}	
+		} 
+	}
 }
 
 int malloc2darray(int ***array, int x, int y)
