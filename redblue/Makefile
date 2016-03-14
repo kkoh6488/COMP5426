@@ -7,7 +7,7 @@ redblue:
 	mpicc redblue.c -o redblue
 
 redbluebuffered:
-	mpicc redblue_buffered.c -o redbluebuffered
+	mpicc redblue_buffered.c debuggrid.c -o redbluebuffered
 
 debug:
 	mpicc redblue.c debuggrid.c -o redblue

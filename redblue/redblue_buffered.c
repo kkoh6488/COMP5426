@@ -5,9 +5,6 @@
 #include "debuggrid.h"
 #include <math.h>
 
-#define TRUE 1
-#define FALSE 0
-
 void board_init(int** grid, int size);
 int malloc2darray(int ***array, int x, int y);
 void solveredturn(int **subgrid, int height, int width);
@@ -128,11 +125,10 @@ int main(char argc, char** argv)
 		int* tempbotbuffer =  (int*) malloc (n * sizeof (int));
 		int* botbuffer =  (int*) malloc (n * sizeof (int)); 
 
-		int src, dest;
-		printf("About to start iter %d of %d \n", curriter, maxiters);	
+		int src, dest;	
 		while (curriter < maxiters)
 		{	
-			printf("Starting iter %d on proc %d\n", curriter, rank);
+			//printf("Starting iter %d on proc %d\n", curriter, rank);
 			solveredturn(localgrid, mynumrows, n);
 			setemptycells(localgrid, mynumrows, n,  1);
 		
@@ -157,16 +153,19 @@ int main(char argc, char** argv)
 						dest = rank - 1;
 						src = rank + 1; 
 					}
-					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, dest, 0, botbuffer, n, MPI_INT, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, dest, 1, botbuffer, n, MPI_INT, src, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				}					
 			}	
-			printf("Received rows: proc %d \n", rank);			
+			//printf("Received rows: proc %d \n", rank);			
 			solveblueturn(localgrid, botbuffer, mynumrows, n);
 			for (int i = 0; i < worldsize; i++)
 			{
 				if (rank == i)
-				{		
-					MPI_Sendrecv(botbuffer, n, MPI_INT, dest, 0, tempbotbuffer, n, MPI_INT, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				{	
+					// Flip the src and dest - send to the src and recv from the dest as we are sending the bot buffer back		
+					MPI_Sendrecv(botbuffer, n, MPI_INT, src, 2, tempbotbuffer, n, MPI_INT, dest, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					printf("Proc %d received botbuffer:\n", rank);
+					print_array(tempbotbuffer, n);
 				}
 			}
 			updatetoprow(&localgrid[0][0], tempbotbuffer,  n);
@@ -174,17 +173,26 @@ int main(char argc, char** argv)
 			setemptybuffercells(botbuffer, n, 2);
 			
 			// Now check if tiles exceed c. If not, proceed with the next iteration.
+			int tileResult[1];
 			if (rank != 0)
-			{
+			{			
 				for (int i = 0; i < mynumrows; i++)
 				{
-					MPI_Send(&localgrid[i][0], n, MPI_INT, 0, 0, MPI_COMM_WORLD);
+					MPI_Send(&localgrid[i][0], n, MPI_INT, 0, 3, MPI_COMM_WORLD);
 				}
+				MPI_Recv(&tileResult[0], 1, MPI_INT, 0, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 			}
 			else
 			{
 				int rowindex = mynumrows;
 				int numrowstorecv;
+				for (int x = 0; x < mynumrows; x++)
+				{
+					for (int y = 0; y < n; y++)
+					{
+						grid[x][y] = localgrid[x][y];
+					}
+				}
 				for (int sender = 1; sender < worldsize; sender++)
 				{
 					int rowsrecvd = 0;
@@ -198,12 +206,23 @@ int main(char argc, char** argv)
 					} 
 					for (int j = 0; j < numrowstorecv; j++)
 					{
-						MPI_Recv(&grid[rowindex][0], n, MPI_INT, sender, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+						MPI_Recv(&grid[rowindex][0], n, MPI_INT, sender, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 						rowindex++; 
 					}
-				} 
-				tilespastthreshold(grid, n, n, numtoexceedc, t, numtiles);			
-			}	
+				}
+				printf("Grid at end of it: %d \n", curriter);
+				print_grid(grid, n, n);
+				tileResult[0] = tilespastthreshold(grid, n, n, numtoexceedc, t, numtiles);
+				for (int i = 1; i < worldsize; i++)
+				{
+					MPI_Send(&tileResult[0], 1, MPI_INT, i, 4, MPI_COMM_WORLD);
+				}			
+			}
+			if (tileResult[0] == 1)
+			{
+				printf("Exceeded c at it %d \n", curriter);
+				break;
+			} 	
 			curriter++;
 		}
 		
@@ -254,7 +273,7 @@ void solveredturn(int **subgrid, int height, int width)
 					if (subgrid[x][y + 1] == 0)	// If the cell to the right is white
 					{
 						subgrid[x][y + 1] = 3;	// Mark it as just moved in
-						//subgrid[x][y] = 4; 	
+						subgrid[x][y] = 0; 	
 					}
 				}
 				else
@@ -313,12 +332,12 @@ void solveblueturn(int **subgrid, int *botbuffer, int height, int width)
 }
 
 // For each process, look at the top row and compare it with the bottom buffer of (rank - 1) process
-// If number moved in (ie is 4) in the bottom buffer, mark the new entry in the top row of this process.
+// If number moved in (ie is 3) in the bottom buffer, mark the new entry in the top row of this process.
 void updatetoprow(int *toprow, int *tempbuffer, int size)
 {
 	for (int i = 0; i < size; i++)
 	{
-		if (tempbuffer[i] == 4)
+		if (tempbuffer[i] == 3)
 		{
 			toprow[i] = 2;
 		}	
@@ -426,6 +445,7 @@ void  board_init(int** grid, int size)
 {
 	printf("Initializing\n");
 	float max = 1.0;
+	srand(time(NULL));			// Set the random number seed
 	for (int x = 0; x < size; x++)
 	{
 		for (int y = 0; y < size; y++)
