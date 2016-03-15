@@ -164,8 +164,8 @@ int main(char argc, char** argv)
 				{	
 					// Flip the src and dest - send to the src and recv from the dest as we are sending the bot buffer back		
 					MPI_Sendrecv(botbuffer, n, MPI_INT, src, 2, tempbotbuffer, n, MPI_INT, dest, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-					printf("Proc %d received botbuffer:\n", rank);
-					print_array(tempbotbuffer, n);
+					//printf("Proc %d received botbuffer:\n", rank);
+					//print_array(tempbotbuffer, n);
 				}
 			}
 			updatetoprow(&localgrid[0][0], tempbotbuffer,  n);
@@ -286,7 +286,7 @@ void solveblueturn(int **subgrid, int *botbuffer, int height, int width)
 					if (subgrid[x + 1][y] == 0)	// If the cell below is white
 					{
 						subgrid[x + 1][y] = 3;
-						subgrid[x][y] = 4; 	
+						subgrid[x][y] = 0; 	
 					}
 				}
 				else					// This row is the bottom row of the localgrid
@@ -334,6 +334,7 @@ int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int 
 	int* numred = (int *) malloc (numtiles * sizeof(int));
 	int* numblue = (int *) malloc (numtiles * sizeof(int));
 	int tilesperrow = width / tilesize;
+	int result = 0;
 	
 	// Zero out arrays - just in case to get rid of old values
 	for (int i = 0; i < numtiles; i++)
@@ -345,11 +346,8 @@ int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int 
 	{
 		for (int y = 0; y < width; y++)
 		{
-			//tilenum =  (y / tilesize) + ((x / tilesize) * tilesize) + ((x / tilesize) * tilesize);// + (x / tilesize);	
-			//tilenum = (y / tilesize) + (x - x % tilesize) * (x / tilesize);
-			//tilenum = tilesize * (y / tilesize) + (x / tilesize);
 			tilenum = (x / tilesize) *  tilesperrow + (y / tilesize);
-			printf("t[%d]", tilenum);
+			//printf("t[%d]", tilenum);
 			if (grid[x][y] == 1)
 			{
 				numred[tilenum] += 1;
@@ -359,18 +357,18 @@ int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int 
 				numblue[tilenum] += 1;
 			}
 		}
-		printf("\n");
+		//printf("\n");
 	}
 	for (int i = 0; i < numtiles; i++)
 	{
-		printf("Num in tile %d (max %d) - red: %d, blue %d \n", i, maxtilecount, numred[i], numblue[i]);
+		//printf("Num in tile %d (max %d) - red: %d, blue %d \n", i, maxtilecount, numred[i], numblue[i]);
 		if (numred[i] >= maxtilecount || numblue[i] >= maxtilecount)
 		{
 			printf("Exceeded at tile %d\n", i);
-			return 1;			
+			result = 1;			
 		}
 	}
-	return 0;
+	return result;
 }
 
 // Takes the subgrid and changes any "moved" values (ie 3 and 4) and turns it into an empty cell (ie 0) or a cell of the given color respectively.
@@ -449,7 +447,6 @@ void  board_init(int** grid, int size)
 		for (int y = 0; y < size; y++)
 		{
 			float val = ((float)rand()/(float)(RAND_MAX)) * max;
-			//printf("val is %f\n", val);
 			if (val <= 0.33)
 			{
 				grid[x][y] = 0;
