@@ -75,20 +75,20 @@ int main(char argc, char** argv)
 		
 		if (rank == 0)
 		{
-			printf("Master num rows %d \n", mynumrows);
+			//printf("Master num rows %d \n", mynumrows);
 			for (int x = 0; x < mynumrows; x++)
 			{
 				for (int y = 0; y < n; y++)
 				{
 					localgrid[x][y] = grid[x][y];
-					printf("%d ", localgrid[x][y]);		
+					//printf("%d ", localgrid[x][y]);		
 				}
-				printf("\n");
+				//printf("\n");
 			}			
 				
 			int dest = 1;
 			int counter = 0;
-			printf("Procs with extra rows: %d \n", procswithextrarows);
+			//printf("Procs with extra rows: %d \n", procswithextrarows);
 			//Send rows from master to worker processes
 			for (int x = mynumrows; x < n; x++)
 			{
@@ -115,7 +115,7 @@ int main(char argc, char** argv)
 			{
 				MPI_Recv(&localgrid[x][0], n, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); 
 			}
-			
+			/*
 			printf("Proc %d \n", rank);	
 			for (int x = 0; x < mynumrows; x++)
 			{
@@ -124,7 +124,8 @@ int main(char argc, char** argv)
 					printf("%d ", localgrid[x][y]);
 				}
 				printf("\n");
-			}	
+			}
+			*/	
 		}
 		int* tempbotbuffer =  (int*) malloc (n * sizeof (int));
 		int* botbuffer =  (int*) malloc (n * sizeof (int)); 
@@ -214,8 +215,8 @@ int main(char argc, char** argv)
 						rowindex++; 
 					}
 				}
-				printf("Grid at end of it: %d \n", curriter);
-				print_grid(grid, n, n);
+				//printf("Grid at end of it: %d \n", curriter);
+				//print_grid(grid, n, n);
 				tileResult[0] = tilespastthreshold(grid, n, n, numtoexceedc, t, numtiles);
 				for (int i = 1; i < worldsize; i++)
 				{
