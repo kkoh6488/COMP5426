@@ -80,7 +80,9 @@ int main(char argc, char** argv)
 				for (int y = 0; y < n; y++)
 				{
 					localgrid[x][y] = grid[x][y];
+					printf("%d ", localgrid[x][y]);		
 				}
+				printf("\n");
 			}			
 				
 			int dest = 1;
@@ -130,14 +132,14 @@ int main(char argc, char** argv)
 				}
 				else if (i == worldsize - 1)
 				{
-					int startrow = mynumrows * rank + extrarowsforproc;
-					printf("Sending last proc, starting from row %d \n", startrow);
-					MPI_Sendrecv(&localgrid[startrow][0], n, MPI_INT, rank - 1, 0, &botbuffer, n, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					//int startrow = mynumrows * rank + extrarowsforproc;
+					//printf("Sending last proc, starting from row %d \n", startrow);
+					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, rank - 1, 0, &botbuffer, n, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				}
 				else
 				{
-					int startrow = mynumrows * rank + extrarowsforproc;
-					MPI_Sendrecv(&localgrid[startrow][0], n, MPI_INT, rank - 1, 0, &botbuffer, n, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					//int startrow = mynumrows * rank + extrarowsforproc;
+					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, rank - 1, 0, &botbuffer, n, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				}
 			}					
 		}
@@ -174,7 +176,8 @@ int main(char argc, char** argv)
 	MPI_Gatherv(&localgrid[0][0], n * subgridsize, MPI_INT, gridptr, sendcounts, displacements, subgridtypeblue, 0, MPI_COMM_WORLD);
 	*/
 	MPI_Finalize();
-
+	
+	/*
 	if (rank == 0)
 	{
 		printf("Result grid \n");
@@ -187,6 +190,7 @@ int main(char argc, char** argv)
 			printf("\n");
 		}
 	}
+	*/
 }		
 
 void solveredturn(int **subgrid, int height, int width)
