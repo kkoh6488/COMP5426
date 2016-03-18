@@ -51,14 +51,16 @@ int main(char argc, char** argv)
 	{
 		// Init the local 2D array for this process
 		int rowsperproc = n / worldsize;
-		int extrarowsforproc = n % worldsize;
-		int masternumrows = rowsperproc + extrarowsforproc;		
+		int extrarowsforproc = n % worldsize;		
 		int mynumrows;		
+		int procswithextrarows = n - worldsize;		
+
 		// Local arrays
 		int **localgrid;
 		
 		// Assign the rows for this process
-		// Give the host process the extra rows
+		// Split up the rows evenly
+		/*
 		if (rank == 0)
 		{
 			mynumrows = rowsperproc + extrarowsforproc;	
@@ -67,15 +69,22 @@ int main(char argc, char** argv)
 		{
 			mynumrows = rowsperproc;	
 		}
+		*/
+		if (rank < procswithextrarows)
+		{
+			mynumrows = rowsperproc + extrarowsforproc / procswithextrarows;
+		}
+		else
+		{
+			mynumrows = rowsperproc;
+		}
 
 		malloc2darray(&localgrid, mynumrows, n);
-		int* topbuffer = (int*) malloc (n * sizeof(int));
-		int* botbuffer = (int*) malloc (n * sizeof(int)); 
-
+		
 		if (rank == 0)
 		{
-			printf("Master num rows %d \n", masternumrows);
-			for (int x = 0; x < masternumrows; x++)
+			printf("Master num rows %d \n", mynumrows);
+			for (int x = 0; x < mynumrows; x++)
 			{
 				for (int y = 0; y < n; y++)
 				{
@@ -88,11 +97,19 @@ int main(char argc, char** argv)
 			int dest = 1;
 			int counter = 0;
 			//Send rows from master to worker processes
-			for (int x = masternumrows; x < n; x++)
+			for (int x = mynumrows; x < n; x++)
 			{
 				MPI_Send(&grid[x][0], n, MPI_INT, dest, 0, MPI_COMM_WORLD);
 				counter++;
-				if (counter == rowsperproc)
+				if (dest < procswithextrarows)
+				{
+					if (counter == mynumrows)
+					{
+						dest++;
+						counter = 0;
+					}
+				} 
+				else if (counter == rowsperproc)
 				{
 					dest++;
 					counter = 0;
@@ -120,30 +137,56 @@ int main(char argc, char** argv)
 		solveredturn(localgrid, mynumrows, n);
 		setemptycells(localgrid, mynumrows, n,  1);
 		
+		int* topbuffer =  (int*) malloc ((n + 1) * sizeof (int));
+		int* botbuffer =  (int*) malloc ((n + 1) * sizeof (int)); 
+
+		//printf("Len of botbuffer: %d \n", (n * sizeof(int)));		
+
+	
 		// For each process, get the row number it needs for the bottom buffer
+		// Each process sends its top row to the previous process bot row
 		for (int i = 0; i < worldsize; i++)
 		{
 			if (rank == i)
 			{
 				if (i == 0)
 				{
-					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, worldsize - 1, 0, &botbuffer, n, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, worldsize - 1, 0, botbuffer, n, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					//MPI_Send(&localgrid[0][0], n, MPI_INT, 1, 0, MPI_COMM_WORLD);
 					printf("Sent from master\n");
+					
 				}
 				else if (i == worldsize - 1)
 				{
+					//MPI_Recv(botbuffer, n, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 					//int startrow = mynumrows * rank + extrarowsforproc;
 					//printf("Sending last proc, starting from row %d \n", startrow);
-					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, rank - 1, 0, &botbuffer, n, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					printf("Sending from rank %d to %d, %d ints\n", rank, rank - 1, n);
+					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, rank - 1, 0, botbuffer, n, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					for (int a = 0; a < n ; a++)
+					{
+						printf("%d ", botbuffer[a]);
+					}
+					printf("\n");
 				}
 				else
 				{
 					//int startrow = mynumrows * rank + extrarowsforproc;
-					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, rank - 1, 0, &botbuffer, n, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, rank - 1, 0, botbuffer, n, MPI_INT, rank + 1, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				}
 			}					
+		}	
+		printf("Received rows: proc %d \n", rank);			
+		/*
+		free(botbuffer);
+		free(topbuffer);
+		free2darray(&localgrid);
+		if (rank == 0)
+		{
+			free2darray(&grid);
 		}
-		printf("Received rows: proc %d \n", rank);				
+		printf("Freed memory \n");
+		*/	
 	}
 	else
 	{
@@ -298,7 +341,7 @@ int malloc2darray(int ***array, int x, int y)
 	{
 		(*array)[a] = &(i[a * y]);
 	}
-	printf("Init grid OK\n");
+	//printf("Init grid OK\n");
 	return 0;
 }
 
