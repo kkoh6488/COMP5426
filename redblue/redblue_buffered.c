@@ -17,9 +17,11 @@ void solveblueturn(int **subgrid, int *botbuffer, int height, int width);
 
 void setemptycells(int **subgrid, int height, int width, int intcolor); 
 
+void setemptybuffercells(int *buf, int size, int color);
+
 int free2darray(int ***array);
 
-void updatebotbuffer(int *botbuffer, int *tempbuffer,  int size);
+void updatetoprow(int *toprow, int *tempbuffer,  int size);
 
 int main(char argc, char** argv)
 {
@@ -36,15 +38,16 @@ int main(char argc, char** argv)
 
 	int n 		= strtol(argv[1], NULL, 10);			// Grid size
 	int t 		= strtol(argv[2], NULL, 10);			// Tile size
-	float  c 	= atof(argv[3]);			// Terminating threshold
-	int max_iters 	= strtol(argv[4], NULL, 10);		// Max iterations
+	float  c 	= atof(argv[3]);				// Terminating threshold
+	int maxiters 	= strtol(argv[4], NULL, 10);			// Max iterations
+	int curriter 	= 0;
 	int **grid;
 	
 	malloc2darray(&grid, n, n);
 	
 	if (rank == 0)
 	{
-		printf("Initializing board of size %d with tile size %d, threshold %f and max iterations %d\n", n, t, c, max_iters);
+		printf("Initializing board of size %d with tile size %d, threshold %f and max iterations %d\n", n, t, c, maxiters);
 		board_init(grid, n);		
 	}
 	
@@ -126,49 +129,79 @@ int main(char argc, char** argv)
 				printf("\n");
 			}	
 		}
-
-		solveredturn(localgrid, mynumrows, n);
-		setemptycells(localgrid, mynumrows, n,  1);
 		
-		int* tempbotbuffer =  (int*) malloc (n * sizeof (int));
-		int* botbuffer =  (int*) malloc (n * sizeof (int)); 
+		while (curriter < maxiters)
+		{	
 
-		int src, dest;
-		
-		// For each process, get the row number it needs for the bottom buffer
-		// Each process sends its top row to the previous process bot row
-		for (int i = 0; i < worldsize; i++)
-		{
-			if (rank == i)
+			solveredturn(localgrid, mynumrows, n);
+			setemptycells(localgrid, mynumrows, n,  1);
+			
+			int* tempbotbuffer =  (int*) malloc (n * sizeof (int));
+			int* botbuffer =  (int*) malloc (n * sizeof (int)); 
+
+			int src, dest;
+			
+			// For each process, get the row number it needs for the bottom buffer
+			// Each process sends its top row to the previous process bot row
+			for (int i = 0; i < worldsize; i++)
 			{
-				if (rank == 0)
+				if (rank == i)
 				{
-					dest = worldsize - 1;
-					src = rank + 1;
+					if (rank == 0)
+					{
+						dest = worldsize - 1;
+						src = rank + 1;
+					}
+					else if (rank == worldsize - 1)
+					{
+						dest = rank - 1;
+						src = 0;
+					}
+					else
+					{
+						dest = rank - 1;
+						src = rank + 1; 
+					}
+					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, dest, 0, botbuffer, n, MPI_INT, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+				}					
+			}	
+			printf("Received rows: proc %d \n", rank);			
+			solveblueturn(localgrid, botbuffer, mynumrows, n);
+			for (int i = 0; i < worldsize; i++)
+			{
+				if (rank == i)
+				{		
+					MPI_Sendrecv(botbuffer, n, MPI_INT, dest, 0, tempbotbuffer, n, MPI_INT, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 				}
-				else if (rank == worldsize - 1)
-				{
-					dest = rank - 1;
-					src = 0;
-				}
-				else
-				{
-					dest = rank - 1;
-					src = rank + 1; 
-				}
-				MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, dest, 0, botbuffer, n, MPI_INT, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-			}					
-		}	
-		printf("Received rows: proc %d \n", rank);			
-		solveblueturn(localgrid, botbuffer, mynumrows, n);
-		for (int i = 0; i < worldsize; i++)
+			}
+			updatetoprow(&localgrid[0][0], tempbotbuffer,  n);
+			setemptycells(localgrid, mynumrows, n, 2);
+			setemptybuffercells(botbuffer, n, 2);
+			
+			// Now check if tiles exceed c. If not, proceed with the next iteration.
+			
+			curriter++;
+		}
+		
+		// Print results array
+		if (rank == 0)
 		{
-			if (rank == i)
-			{		
-				MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, dest, 0, tempbotbuffer, n, MPI_INT, src, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			// Assemble the final array
+			for (int i = 0; i < worldsize; i++)
+			{
+				if (i < procswithextrarows)
+				{
+					//MPI_Recv
+				}
 			}
 		}
-		updatebotbuffer(botbuffer, tempbotbuffer,  n);	
+		else
+		{
+			for (int i = 0; i < mynumrows; i++)
+			{
+				
+			}
+		}
 	}
 	else
 	{
@@ -281,11 +314,16 @@ void solveblueturn(int **subgrid, int *botbuffer, int height, int width)
 	}
 }
 
-void updatebotbuffer(int *botbuffer, int *tempbuffer, int size)
+// For each process, look at the top row and compare it with the bottom buffer of (rank - 1) process
+// If number moved in (ie is 4) in the bottom buffer, mark the new entry in the top row of this process.
+void updatetoprow(int *toprow, int *tempbuffer, int size)
 {
 	for (int i = 0; i < size; i++)
 	{
-		
+		if (tempbuffer[i] == 4)
+		{
+			toprow[i] = 2;
+		}	
 	}
 }
 
@@ -312,6 +350,21 @@ void setemptycells(int **subgrid, int height, int width, int intcolor)
 				subgrid[x][y] = intcolor;
 			}	
 		} 
+	}
+}
+
+void setemptybuffercells(int *buf, int size, int color)
+{
+	for (int x = 0; x < size; x++)
+	{
+		if (buf[x] == 4)
+		{
+			buf[x] = 0;
+		}
+		else if (buf[x] == 3)
+		{
+			buf[x] = color;
+		}
 	}
 }
 
