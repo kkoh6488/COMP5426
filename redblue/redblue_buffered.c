@@ -14,47 +14,51 @@ void setemptybuffercells(int *buf, int size, int color);
 int free2darray(int ***array);
 void updatetoprow(int *toprow, int *tempbuffer,  int size);
 int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int tilesize, int numtiles);
+void counttiles(int **localgrid, int *numred, int *numblue, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles);
 
 int main(char argc, char** argv)
 {
-	if ((argc + 0) != 5)
-	{	
+	if ((argc + 0) != 5) {	
 		printf("Required arguments missing");
 		return -1;
 	}
+
 	MPI_Init(NULL, NULL);
 	int rank, worldsize;
 	MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &worldsize);	
 
-	int n 			= strtol(argv[1], NULL, 10);			// Grid size
-	int t 			= strtol(argv[2], NULL, 10);			// Tile size
-	float  c 		= atof(argv[3]);				// Terminating threshold
-	int maxiters 		= strtol(argv[4], NULL, 10);			// Max iterations
-	int curriter 		= 0;						// Current iteration
-	int **grid;								// Master grid
-	int numtoexceedc	= (int)(t * t * c + 1);				// Cells to exceed the threshold
+	int n 				= strtol(argv[1], NULL, 10);	// Grid size
+	int t 				= strtol(argv[2], NULL, 10);	// Tile size
+	float  c 			= atof(argv[3]);				// Terminating threshold
+	int maxiters 		= strtol(argv[4], NULL, 10);	// Max iterations
+	int curriter 		= 0;							// Current iteration
+	int **grid;											// Master grid
+	int numtoexceedc	= (int)(t * t * c + 1);			// Cells to exceed the threshold
 	int numtiles		= (n / t) * (n / t);
 	clock_t start, end;
 	double elapsed;	
 	
-	
 	malloc2darray(&grid, n, n);
 	
-	if (rank == 0)
-	{
+	if (rank == 0) {
 		printf("Initializing board of size %d with tile size %d, threshold %f and max iterations %d, num to exceed %d \n", n, t, c, maxiters, numtoexceedc);
 		board_init(grid, n);		
 	}
 	
 	start = clock();
-	if (worldsize > 1)
-	{
+	if (worldsize > 1) {
 		// Init the local 2D array for this process
-		int rowsperproc = n / worldsize;
-		int extrarowsforproc = n % worldsize;		
+		int rowsperproc 		= n / worldsize;
+		int extrarowsforproc 	= n % worldsize;		
 		int mynumrows;
-		int procswithextrarows = extrarowsforproc % worldsize;				
+		int procswithextrarows 	= extrarowsforproc % worldsize;		
+		int* temptilecountred 	= (int*) malloc (t * t * sizeof(int));
+		int* temptilecountblue 	= (int*) malloc (t * t * sizeof(int));
+		int* numred				= (int*) malloc (t * t * sizeof(int));
+		int* numblue			= (int*) malloc (t * t * sizeof(int));
+		int tilesperrow 		= n / t;
+		int numtiles			= t * t;		
 
 		// Local arrays
 		int **localgrid;
@@ -62,12 +66,10 @@ int main(char argc, char** argv)
 		// Assign the rows for this process
 		// Split up the rows evenly
 		
-		if (rank < procswithextrarows)
-		{
+		if (rank < procswithextrarows) {
 			mynumrows = rowsperproc + extrarowsforproc / procswithextrarows;
 		}
-		else
-		{
+		else {
 			mynumrows = rowsperproc;
 		}
 
@@ -76,10 +78,8 @@ int main(char argc, char** argv)
 		if (rank == 0)
 		{
 			//printf("Master num rows %d \n", mynumrows);
-			for (int x = 0; x < mynumrows; x++)
-			{
-				for (int y = 0; y < n; y++)
-				{
+			for (int x = 0; x < mynumrows; x++) {
+				for (int y = 0; y < n; y++) {
 					localgrid[x][y] = grid[x][y];
 					//printf("%d ", localgrid[x][y]);		
 				}
@@ -90,29 +90,23 @@ int main(char argc, char** argv)
 			int counter = 0;
 			//printf("Procs with extra rows: %d \n", procswithextrarows);
 			//Send rows from master to worker processes
-			for (int x = mynumrows; x < n; x++)
-			{
+			for (int x = mynumrows; x < n; x++) {
 				MPI_Send(&grid[x][0], n, MPI_INT, dest, 0, MPI_COMM_WORLD);
 				counter++;
-				if (dest < procswithextrarows)
-				{
-					if (counter == mynumrows)
-					{
+				if (dest < procswithextrarows) {
+					if (counter == mynumrows) {
 						dest++;
 						counter = 0;
 					}
 				} 
-				else if (counter == rowsperproc)
-				{
+				else if (counter == rowsperproc) {
 					dest++;
 					counter = 0;
 				}	
 			}
 		}
-		else
-		{
-			for (int x = 0; x < mynumrows; x++)
-			{
+		else {
+			for (int x = 0; x < mynumrows; x++) {
 				MPI_Recv(&localgrid[x][0], n, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE); 
 			}
 			/*
@@ -131,30 +125,24 @@ int main(char argc, char** argv)
 		int* botbuffer =  (int*) malloc (n * sizeof (int)); 
 
 		int src, dest;	
-		while (curriter < maxiters)
-		{	
+		while (curriter < maxiters) {	
 			//printf("Starting iter %d on proc %d\n", curriter, rank);
 			solveredturn(localgrid, mynumrows, n);
 			setemptycells(localgrid, mynumrows, n,  1);
 		
 			// For each process, get the row number it needs for the bottom buffer
 			// Each process sends its top row to the previous process bot row
-			for (int i = 0; i < worldsize; i++)
-			{
-				if (rank == i)
-				{
-					if (rank == 0)
-					{
+			for (int i = 0; i < worldsize; i++) {
+				if (rank == i) {
+					if (rank == 0) {
 						dest = worldsize - 1;
 						src = rank + 1;
 					}
-					else if (rank == worldsize - 1)
-					{
+					else if (rank == worldsize - 1) {
 						dest = rank - 1;
 						src = 0;
 					}
-					else
-					{
+					else {
 						dest = rank - 1;
 						src = rank + 1; 
 					}
@@ -163,10 +151,8 @@ int main(char argc, char** argv)
 			}	
 			//printf("Received rows: proc %d \n", rank);			
 			solveblueturn(localgrid, botbuffer, mynumrows, n);
-			for (int i = 0; i < worldsize; i++)
-			{
-				if (rank == i)
-				{	
+			for (int i = 0; i < worldsize; i++) {
+				if (rank == i) {	
 					// Flip the src and dest - send to the src and recv from the dest as we are sending the bot buffer back		
 					MPI_Sendrecv(botbuffer, n, MPI_INT, src, 2, tempbotbuffer, n, MPI_INT, dest, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 					//printf("Proc %d received botbuffer:\n", rank);
@@ -178,55 +164,42 @@ int main(char argc, char** argv)
 			setemptybuffercells(botbuffer, n, 2);
 			
 			// Now check if tiles exceed c. If not, proceed with the next iteration.
-			int tileResult[1];
-			if (rank != 0)
-			{			
-				for (int i = 0; i < mynumrows; i++)
-				{
-					MPI_Send(&localgrid[i][0], n, MPI_INT, 0, 3, MPI_COMM_WORLD);
-				}
-				MPI_Recv(&tileResult[0], 1, MPI_INT, 0, 4, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+			int tileresult;
+			int toprowindex;				// The index in the whole grid of the top local row
+
+			if (rank > procswithextrarows) {
+				toprowindex = (procswithextrarows * extrarowsforproc) + (rank - procswithextrarows) * rowsperproc;
 			}
-			else
-			{
-				int rowindex = mynumrows;
-				int numrowstorecv;
-				for (int x = 0; x < mynumrows; x++)
-				{
-					for (int y = 0; y < n; y++)
-					{
-						grid[x][y] = localgrid[x][y];
-					}
-				}
-				for (int sender = 1; sender < worldsize; sender++)
-				{
-					int rowsrecvd = 0;
-					if (sender < procswithextrarows - 1)
-					{	
-						numrowstorecv = mynumrows;
-					}
-					else
-					{
-						numrowstorecv = rowsperproc;
-					} 
-					for (int j = 0; j < numrowstorecv; j++)
-					{
-						MPI_Recv(&grid[rowindex][0], n, MPI_INT, sender, 3, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-						rowindex++; 
-					}
-				}
-				//printf("Grid at end of it: %d \n", curriter);
-				//print_grid(grid, n, n);
-				tileResult[0] = tilespastthreshold(grid, n, n, numtoexceedc, t, numtiles);
-				for (int i = 1; i < worldsize; i++)
-				{
-					MPI_Send(&tileResult[0], 1, MPI_INT, i, 4, MPI_COMM_WORLD);
-				}			
+			else {
+				toprowindex = rank * procswithextrarows * extrarowsforproc;
 			}
-			if (tileResult[0] == 1)
-			{
+
+			printf("Proc %d with top row %d \n", rank, toprowindex);
+			//void counttiles(int **localgrid, int *numred, int *numblue, int height, int width, int toprowindex, int tilesize, int tilesperrow)
+			counttiles(localgrid, numred, numblue, mynumrows, n, toprowindex, t, tilesperrow, numtiles);
+
+			MPI_Reduce(numred, temptilecountred, numtiles, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+			if (rank == 0) {
+				for (int i = 0; i < numtiles; i++) {
+					if (temptilecountred[i] >= numtoexceedc) {
+						printf("Tile exceeded c: %d\n", i);
+						tileresult = -1;
+					}
+				}
+			}
+			MPI_Reduce(numblue, temptilecountblue, numtiles, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+			if (rank == 0) {
+				for (int i = 0; i < numtiles; i++) {
+					if (temptilecountblue[i] >= numtoexceedc) {
+						printf("Tile exceeded c: %d\n", i);
+						tileresult = -1;
+					}
+				}
+			}
+			MPI_Bcast(&tileresult, 1, MPI_INT, 0, MPI_COMM_WORLD);
+			if (tileresult == -1) {
 				break;
-			} 	
+			}
 			curriter++;
 		}	
 	}
@@ -253,14 +226,43 @@ int main(char argc, char** argv)
 		
 // For each process, look at the top row and compare it with the bottom buffer of (rank - 1) process
 // If number moved in (ie is 3) in the bottom buffer, mark the new entry in the top row of this process.
-void updatetoprow(int *toprow, int *tempbuffer, int size)
-{
+void updatetoprow(int *toprow, int *tempbuffer, int size) {
 	for (int i = 0; i < size; i++)
 	{
 		if (tempbuffer[i] == 3)
 		{
 			toprow[i] = 2;
 		}	
+	}
+}
+
+void counttiles(int **localgrid, int *numred, int *numblue, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles) {
+	// Zero out arrays - just in case to get rid of old values
+	for (int i = 0; i < numtiles; i++) {
+		numred[i] = 0;
+		numblue[i] = 0;
+	}
+
+	for (int x = 0; x < height; x++)
+	{
+		int rowindex = toprowindex + x;
+		//if (rowindex % tilesize == 0)
+		//{
+		for (int y = 0; y < width; y++)
+		{
+			int tilenum = (rowindex / tilesize) *  tilesperrow + (y / tilesize);
+			//printf("t[%d]", tilenum);
+			if (localgrid[x][y] == 1)
+			{
+				numred[tilenum] += 1;
+			}
+			else if (localgrid[x][y] == 2)
+			{
+				numblue[tilenum] += 1;
+			}
+		}
+		//}
+		//printf("\n");
 	}
 }
 
