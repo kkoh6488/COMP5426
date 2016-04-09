@@ -14,7 +14,7 @@ void setemptybuffercells(int *buf, int size, int color);
 int free2darray(int ***array);
 void updatetoprow(int *toprow, int *tempbuffer,  int size);
 int tilespastthreshold(int **grid, int height, int width, int maxtilecount, int tilesize, int numtiles);
-int counttiles(int **localgrid, int *numred, int *numblue, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells);
+int counttiles(int **localgrid, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells);
 
 int main(char argc, char** argv)
 {
@@ -47,16 +47,12 @@ int main(char argc, char** argv)
 	}
 	
 	start = clock();
-	if (worldsize > 1) {
+	if (worldsize > 1 && t != n) {
 		// Init the local 2D array for this process
 		//int rowsperproc 		= n / worldsize;
 		//int extrarowsforproc 	= n % worldsize;		
 		int mynumrows;
 		//int procswithextrarows 	= extrarowsforproc % worldsize;		
-		int* temptilecountred 	= (int*) malloc (t * t * sizeof(int));
-		int* temptilecountblue 	= (int*) malloc (t * t * sizeof(int));
-		int* numred				= (int*) malloc (t * t * sizeof(int));
-		int* numblue			= (int*) malloc (t * t * sizeof(int));
 		int tilesperrow 		= n / t;
 		int remaindertiles, usedworldsize;
 
@@ -87,7 +83,6 @@ int main(char argc, char** argv)
 		int tilesperproc		= tilesperrow / gsize;			// How many tiles if we split evenly?
 		int procswithextratiles = remaindertiles % gsize;		// How many processes get extra tile rows	
 		int rowsperproc			= tilesperproc * t;		// 
-		int numtiles			= t * t;		
 
 		// Local arrays
 		int **localgrid;
@@ -213,7 +208,7 @@ int main(char argc, char** argv)
 			printf("Proc %d with top row %d \n", grank, toprowindex);
 			print_grid(localgrid, mynumrows, n);
 			//void counttiles(int **localgrid, int *numred, int *numblue, int height, int width, int toprowindex, int tilesize, int tilesperrow)
-			tileresult = counttiles(localgrid, numred, numblue, mynumrows, n, toprowindex, t, tilesperrow, numtiles, numtoexceedc);
+			tileresult = counttiles(localgrid, mynumrows, n, toprowindex, t, tilesperrow, numtiles, numtoexceedc);
 			
 			/*MPI_Reduce(numred, temptilecountred, numtiles, MPI_INT, MPI_SUM, 0, activecomm);
 			if (grank == 0) {
@@ -245,6 +240,11 @@ int main(char argc, char** argv)
 	}
 	else
 	{
+		if (rank > 0) {
+			MPI_Finalize();
+			exit(0);
+		}
+
 		while (curriter < maxiters)
 		{
 			solveredturn(grid, n, n);
@@ -276,35 +276,35 @@ void updatetoprow(int *toprow, int *tempbuffer, int size) {
 	}
 }
 
-int counttiles(int **localgrid, int *numred, int *numblue, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells) {
+int counttiles(int **localgrid, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells) {
+	
+	int* numred				= (int*) malloc (numtiles * sizeof(int));
+	int* numblue			= (int*) malloc (numtiles * sizeof(int));
 	// Zero out arrays - just in case to get rid of old values
 	for (int i = 0; i < numtiles; i++) {
 		numred[i] = 0;
 		numblue[i] = 0;
 	}
 	int result = 0;
-	for (int x = 0; x < height; x++)
-	{
+	for (int x = 0; x < height; x++) {
 		int rowindex = toprowindex + x;
 		//if (rowindex % tilesize == 0)
 		//{
-		for (int y = 0; y < width; y++)
-		{
+		for (int y = 0; y < width; y++) {
 			int tilenum = (rowindex / tilesize) *  tilesperrow + (y / tilesize);
+			printf("tilenum :%d, red: %d, blue: %d\n", tilenum, numred[tilenum], numblue[tilenum]);
 			//printf("t[%d]", tilenum);
-			if (localgrid[x][y] == 1)
-			{
-				numred[tilenum] += 1;
+			if (localgrid[x][y] == 1) {
+				numred[tilenum]++;
 			}
-			else if (localgrid[x][y] == 2)
-			{
-				numblue[tilenum] += 1;
+			else if (localgrid[x][y] == 2) {
+				numblue[tilenum]++;
 			}
 			//printf("x + 1, y + 1, tilesize: %d, %d, %d\n", x + 1, y + 1, tilesize);
 			if ((x + 1) % tilesize == 0 && (y + 1) % tilesize == 0) {
 				//printf("Checking tile %d\n", tilenum);
 				if (numred[tilenum] >= maxcells || numblue[tilenum] >= maxcells) {
-					printf("Tile %d exceeded max\n", tilenum);
+					printf("Tile %d exceeded max @ red:%d, blue:%d\n", tilenum, numred[tilenum], numblue[tilenum]);
 					result = -1;
 				} 
 			}
