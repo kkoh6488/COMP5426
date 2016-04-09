@@ -1,13 +1,10 @@
 CFLAGS=-Wall -g
 
 clean:
-	rm redbluebuffered
+	rm redblue
 
 redblue:
-	mpicc redblue.c -o redblue
+	mpicc redblue.c redblueprocedure.c debuggrid.c -o redblue
 
-redbluebuffered:
-	mpicc redblue_buffered.c redblueprocedure.c debuggrid.c -o redbluebuffered
-
-debug:
-	mpicc redblue.c debuggrid.c -o redblue
+redbluedebug:
+	mpicc redbluedebug.c redblueprocedure.c debuggrid.c -o redbluedebug
