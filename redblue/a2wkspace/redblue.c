@@ -107,9 +107,6 @@ int main(char argc, char** argv) {
 		int mycoordx = mycoords[0];
 		int mycoordy = mycoords[1];
 		
-		//MPI_Finalize();
-		//return;
-
 		int xtilesperproc			= tilesperrow / xprocs;			// How many tiles per proc in x dimension?
 		int ytilesperproc			= tilesperrow / yprocs;
 
@@ -204,7 +201,6 @@ int main(char argc, char** argv) {
 		MPI_Cart_shift(cartcomm, 1, 1, &left, &right);
 		MPI_Cart_shift(cartcomm, 0, 1, &top, &bot);
 
-
 		// Define vector type for sending columns
 		MPI_Datatype column, coltype, redtype;
 		
@@ -267,7 +263,7 @@ int main(char argc, char** argv) {
 			toprowindex = (mycoordx + xprocswithextratiles) * rowsperproc;
 			leftcolindex = (mycoordy + yprocswithextratiles) * colsperproc;
 			//printf("Start row and col for p%d = %d, %d \n", grank, toprowindex, leftcolindex);
-			//tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, leftcolindex, t, tilesperrow, numtiles, numtoexceedc);
+			tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, leftcolindex, t, tilesperrow, numtiles, numtoexceedc);
 			MPI_Allreduce(&tileresult, &allresult, 1, MPI_INT, MPI_MIN, activecomm);
 			if (allresult == -1) {
 				break;
@@ -367,7 +363,7 @@ int counttiles(int **localgrid, int height, int width, int toprowindex, int left
 		for (int y = 0; y < width; y++) {
 			int colindex = leftcolindex + y;
 			int tilenum = (rowindex / tilesize) *  tilesperrow + (colindex / tilesize);
-			printf("t[%d]", tilenum);
+			//printf("t[%d]", tilenum);
 			if (localgrid[x][y] == 1) {
 				numred[tilenum]++;
 			}
@@ -381,7 +377,7 @@ int counttiles(int **localgrid, int height, int width, int toprowindex, int left
 				} 
 			}
 		}
-		printf("\n");
+		//printf("\n");
 	}
 	return result;
 }
