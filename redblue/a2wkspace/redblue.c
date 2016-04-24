@@ -13,6 +13,7 @@ void setemptycells(int **subgrid, int height, int width, int intcolor);
 void setemptybuffercells(int *buf, int size, int color);
 int free2darray(int ***array);
 void updatetoprow(int *toprow, int *tempbuffer,  int size);
+void updateleftrow(int **localgrid, int *tempcol, int height);
 int counttiles(int **localgrid, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells);
 void get2dprocdimensions(int *xdim, int *ydim, int worldsize);
 
@@ -102,7 +103,7 @@ int main(char argc, char** argv) {
 		MPI_Comm_rank(cartcomm, &grank);
 		MPI_Comm_size(cartcomm, &gsize);
 		MPI_Cart_coords(cartcomm, grank, 2, mycoords);
-		printf("mycoords for rank %d: %d, %d\n", grank, mycoords[0], mycoords[1]);
+		//printf("mycoords for rank %d: %d, %d\n", grank, mycoords[0], mycoords[1]);
 		int mycoordx = mycoords[0];
 		int mycoordy = mycoords[1];
 		
@@ -144,14 +145,14 @@ int main(char argc, char** argv) {
 			//int colstarttile = mynumcols / t;			// How many tiles did the master send?
 			int colproc = 0, rowproc = 0;
 			int destcoords[2];
-			printf("Procs with extra rows %d, %d \n", xprocswithextratiles, yprocswithextratiles);
+			//printf("Procs with extra rows %d, %d \n", xprocswithextratiles, yprocswithextratiles);
 
 			for (int x = 0; x < n; x++) {						//Send rows from master to worker processes
 				for (int y = 0; y < n;) {
 					int tilecolindex = y / t;			// Get the index of this tile columnwise
 					int tilerowindex = x / t;			
 
-					printf("Tile indices for [%d, %d]: %d, %d\n", x, y, tilerowindex, tilecolindex);
+					//printf("Tile indices for [%d, %d]: %d, %d\n", x, y, tilerowindex, tilecolindex);
 					if (y < mynumcols * yprocswithextratiles) {
 						colproc = y / mynumcols;
 						sendcols = mynumcols;
@@ -171,7 +172,7 @@ int main(char argc, char** argv) {
 					destcoords[0] = rowproc;
 					destcoords[1] = colproc;
 					MPI_Cart_rank(cartcomm, destcoords, &dest);
-					printf("owner proc for tile %d,%d is: [%d, %d] = rank %d\n", tilerowindex, tilecolindex, rowproc, colproc, dest);					
+					//printf("owner proc for tile %d,%d is: [%d, %d] = rank %d\n", tilerowindex, tilecolindex, rowproc, colproc, dest);					
 					if (dest == 0) {
 						y += sendcols;
 						continue;
@@ -188,17 +189,57 @@ int main(char argc, char** argv) {
 			}
 		}
 
-		int* temprightbuffer = (int*) malloc (mynumrows * sizeof (int));
-		int* rightbuffer = (int*) malloc (mynumrows * sizeof(int));
-		int* tempbotbuffer =  (int*) malloc (mynumcols * sizeof (int));
-		int* botbuffer =  (int*) malloc (mynumcols * sizeof (int)); 
+		// For storing columns into rows for red turn
+		int* rightcolbuffer = malloc (mynumrows * sizeof (int));
+		int* templeftbuffer = malloc (mynumrows * sizeof (int));
+		int* leftcolrow = malloc (mynumrows * sizeof (int));
+		for (int i = 0; i < mynumrows; i++) {
+			leftcolrow[i] = localgrid[i][0];
+		} 
+		
+		int* tempbotbuffer =  malloc (mynumcols * sizeof (int));
+		int* botbuffer =  malloc (mynumcols * sizeof (int)); 
 		int src, dest;	
+		int right, left, top, bot;
+
+		MPI_Cart_shift(cartcomm, 1, 1, &left, &right);
+		MPI_Cart_shift(cartcomm, 0, 1, &bot, &top);
+
+
+		// Define vector type for sending columns
+		MPI_Datatype column, coltype, redtype;
+		/*
+		MPI_Type_vector(mynumrows, 1, mynumcols, MPI_INT, &column);
+		MPI_Type_commit(&column);
+		MPI_Type_create_resized(column, 0, mynumrows*sizeof(int), &coltype);
+		MPI_Type_commit(&coltype);
+		
+		int subgridsizesred[2]	= { 1, mynumrows };
+		int startindices[2] = { 0, 0 };
+		int gridsizes[2] = { mynumrows, mynumcols };
+		MPI_Type_create_subarray(2, gridsizes, subgridsizesred, startindices, MPI_ORDER_C, MPI_INT, &redtype);
+		MPI_Type_create_resized(redtype, 0, mynumrows * sizeof(int), &column);
+		MPI_Type_commit(&column);
+		*/
+		//printf("left and right procs for %d are: %d, %d\n", grank, left, right);
 
 		while (curriter < maxiters) {	
-			solveredturn(localgrid, mynumrows, mynumcols);
+
+			MPI_Sendrecv(leftcolrow, mynumrows, MPI_INT, left, 0, rightcolbuffer, mynumrows, MPI_INT, right, 0, activecomm, MPI_STATUS_IGNORE);
+			//printf("Received rightbuf for p%d from %d\n", grank, right);
+			//print_array(rightcolbuffer, mynumrows);
+			
+			solveredturn(localgrid, rightcolbuffer, mynumrows, mynumcols);
+			MPI_Sendrecv(rightcolbuffer, mynumrows, MPI_INT, right, 0, templeftbuffer, mynumrows, MPI_INT, left, 0, activecomm, MPI_STATUS_IGNORE);
+			updateleftrow(localgrid, templeftbuffer, mynumrows);
+
+			//void updateleftrow(int **localgrid, int *tempcol, int height) {
+
 			setemptycells(localgrid, mynumrows, mynumcols,  1);
+			setemptybuffercells(rightcolbuffer, mynumrows, 1);
 			// For each process, get the row number it needs for the bottom buffer
 			// Each process sends its top row to the previous process bot row
+			/*
 			for (int i = 0; i < gsize; i++) {
 				if (grank == i) {
 					if (grank == 0) {
@@ -213,14 +254,15 @@ int main(char argc, char** argv) {
 						dest = grank - 1;
 						src = grank + 1; 
 					}
-					MPI_Sendrecv(&localgrid[0][0], mynumcols, MPI_INT, dest, 1, botbuffer, mynumcols, MPI_INT, src, 1, activecomm, MPI_STATUS_IGNORE);
 				}					
 			}	
+			*/
+			MPI_Sendrecv(&localgrid[0][0], mynumcols, MPI_INT, top, 1, botbuffer, mynumcols, MPI_INT, bot, 1, activecomm, MPI_STATUS_IGNORE);
 			solveblueturn(localgrid, botbuffer, mynumrows, mynumcols);
 			for (int i = 0; i < gsize; i++) {
 				if (grank == i) {	
 					// Flip the src and dest - send to the src and recv from the dest as we are sending the bot buffer back		
-					MPI_Sendrecv(botbuffer, mynumcols, MPI_INT, src, 2, tempbotbuffer, mynumcols, MPI_INT, dest, 2, activecomm, MPI_STATUS_IGNORE);
+					MPI_Sendrecv(botbuffer, mynumcols, MPI_INT, bot, 2, tempbotbuffer, mynumcols, MPI_INT, top, 2, activecomm, MPI_STATUS_IGNORE);
 				}
 			}
 			updatetoprow(&localgrid[0][0], tempbotbuffer,  mynumcols);
@@ -230,6 +272,7 @@ int main(char argc, char** argv) {
 			// Now check if tiles exceed c. If not, proceed with the next iteration.
 			int tileresult 		= 0;
 			int toprowindex 	= -1;				// The index in the whole grid of the top local row
+			int leftcolindex	= -1;
 			int allresult 		= 0;
 
 			// Get the index of the top row
@@ -238,6 +281,11 @@ int main(char argc, char** argv) {
 			}
 			else {
 				toprowindex = grank * xprocswithextratiles * (xremaindertiles + t);
+			}
+			if (grank >= yprocswithextratiles) {
+
+			} else {
+
 			}
 			tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, t, tilesperrow, numtiles, numtoexceedc);
 			MPI_Allreduce(&tileresult, &allresult, 1, MPI_INT, MPI_MIN, activecomm);
@@ -256,7 +304,7 @@ int main(char argc, char** argv) {
 			exit(0);
 		}
 		while (curriter < maxiters) {
-			solveredturn(grid, n, n);
+			solveredturn(grid, NULL, n, n);
 			setemptycells(grid, n, n, 1);
 			solveblueturn(grid, NULL, n, n);
 			setemptycells(grid, n, n, 2);
@@ -275,7 +323,6 @@ int main(char argc, char** argv) {
 }
 
 void get2dprocdimensions(int *xdim, int *ydim, int worldsize) {
-
 	for (int size = worldsize; size > 0; size--) {
 		int numfactors = 0, lastfactor = -1;
 		// Get the factors of np
@@ -313,11 +360,20 @@ void updatetoprow(int *toprow, int *tempbuffer, int size) {
 	}
 }
 
+/* Checks the temp left column buffer and updates values for this local grid. */
+void updateleftrow(int **localgrid, int *tempcol, int height) {
+	for (int i = 0; i < height; i++) {
+		if (tempcol[i] == 3) {
+			localgrid[i][0] = 1;
+		}
+	}
+} 
+
 /* Counts the number of cells in each tile, checking if it exceeds the threshold. */
 int counttiles(int **localgrid, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells) {
 	
-	int* numred				= (int*) malloc (numtiles * sizeof(int));
-	int* numblue			= (int*) malloc (numtiles * sizeof(int));
+	int* numred				= malloc (numtiles * sizeof(int));
+	int* numblue			= malloc (numtiles * sizeof(int));
 
 	// Zero out arrays - just in case to get rid of old values
 	for (int i = 0; i < numtiles; i++) {
@@ -375,7 +431,7 @@ void setemptybuffercells(int *buf, int size, int color) {
 
 /* Allocates memory for a 2D array. */
 int malloc2darray(int ***array, int x, int y) {
-	int *i = (int *) malloc (x * y * sizeof(int));
+	int *i = malloc (x * y * sizeof(int));
 	if (!i) {
 		return -1;
 	}

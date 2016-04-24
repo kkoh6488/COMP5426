@@ -1,7 +1,7 @@
 #include "redblueprocedure.h"
 
 /* Iterates through the given grid and moves valid red cells. */
-void solveredturn(int **subgrid, int height, int width) {
+void solveredturn(int **subgrid, int *rightbuffer, int height, int width) {
 	for (int x = 0; x < height; x++) {
 		for (int y = 0; y < width; y++) {
 			if (subgrid[x][y] == 1) {				// If this cell is red
@@ -12,9 +12,16 @@ void solveredturn(int **subgrid, int height, int width) {
 					}
 				}
 				else {
-					if (subgrid[x][0] == 0) {
-						subgrid[x][0] = 3;		// Mark the new cell
-						subgrid[x][y] = 4;		// Show this cell was left this turn
+					if (!rightbuffer) {				// If no buffer (ie 1 process)
+						if (subgrid[x][0] == 0) {
+							subgrid[x][0] = 3;		// Mark the new cell
+							subgrid[x][y] = 4;		// Show this cell was left this turn
+						}
+					} else {
+						if (rightbuffer[x] == 0) {
+							subgrid[x][y] = 4;
+							rightbuffer[x] = 3;
+						}
 					}
 				}	
 			}
