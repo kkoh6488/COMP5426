@@ -14,6 +14,7 @@ void setemptybuffercells(int *buf, int size, int color);
 int free2darray(int ***array);
 void updatetoprow(int *toprow, int *tempbuffer,  int size);
 int counttiles(int **localgrid, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells);
+void get2dprocdimensions(int *xdim, int *ydim, int worldsize);
 
 int main(char argc, char** argv) {
 	if ((argc + 0) != 5) {	
@@ -48,78 +49,154 @@ int main(char argc, char** argv) {
 	
 	start = clock();
 	if (worldsize > 1 && t != n) {
-		int mynumrows, remaindertiles, usedworldsize;
+		int mynumrows, mynumcols, xremaindertiles, yremaindertiles;
 
-		if (worldsize > tilesperrow) {
-			remaindertiles = 0;
-			usedworldsize = tilesperrow;
+		// Max number of processes in each dimension
+		int maxprocs = tilesperrow;
+
+		// Get the size of the 2D torus in each dimension
+		int xprocs, yprocs;
+		xprocs = yprocs = 0;
+		get2dprocdimensions(&xprocs, &yprocs, worldsize);
+
+		// If the number of processes in x or y > number of tiles, limit the dimension.
+		if (xprocs > maxprocs) {
+			xprocs = maxprocs;
+		}
+		if (yprocs > maxprocs) {
+			yprocs = maxprocs;
+		}
+		if (rank == 0) {
+			printf("Sizes are: %d, %d. Max is %d\n", xprocs, yprocs, maxprocs);
+		}
+
+		if (worldsize > tilesperrow * tilesperrow) {
+			xremaindertiles = yremaindertiles = 0;
 		}
 		else {
-			remaindertiles = tilesperrow % worldsize;
-			usedworldsize = worldsize;
+			xremaindertiles = tilesperrow % xprocs;
+			yremaindertiles = tilesperrow % yprocs;
 		}
-
+		
 		// Make the active process communicator
 		MPI_Comm activecomm;
-		int color = rank / tilesperrow;
+		int color = rank / (xprocs * yprocs);
 		MPI_Comm_split(MPI_COMM_WORLD, color, rank, &activecomm);
-		int grank, gsize;
-		MPI_Comm_rank(activecomm, &grank);
-		MPI_Comm_size(activecomm, &gsize);
 
-		if (rank >= usedworldsize) {							// Quit if the process isn't needed
+		if (rank >= xprocs * yprocs) {							// Quit if the process isn't needed
 			printf("Unused process %d, exiting...\n", rank);
 			MPI_Finalize();
 			exit(0);
 		}
-
-		int tilesperproc		= tilesperrow / gsize;			// How many tile rows per process if we split evenly?
-		int procswithextratiles = remaindertiles % gsize;		// How many processes get extra tile rows?
-		int rowsperproc			= tilesperproc * t;				// Translate tiles into row counts
 		
+		// Make the 2D torus topology
+		MPI_Comm cartcomm;
+		int dims[2] 	= { xprocs, yprocs };
+		int period[2] 	= { 1, 1 };
+		int reorder 	= 0;
+		MPI_Cart_create(activecomm, 2, dims, period, reorder, &cartcomm);
+		
+		int grank, gsize;
+		int mycoords[2];
+
+		MPI_Comm_rank(cartcomm, &grank);
+		MPI_Comm_size(cartcomm, &gsize);
+		MPI_Cart_coords(cartcomm, grank, 2, mycoords);
+		printf("mycoords for rank %d: %d, %d\n", grank, mycoords[0], mycoords[1]);
+		int mycoordx = mycoords[0];
+		int mycoordy = mycoords[1];
+		
+		//MPI_Finalize();
+		//return;
+
+		int xtilesperproc			= tilesperrow / xprocs;			// How many tiles per proc in x dimension?
+		int ytilesperproc			= tilesperrow / yprocs;
+
+		int xprocswithextratiles 	= xremaindertiles % xprocs;		// How many processes get extra tiles in x dim?
+		int yprocswithextratiles 	= yremaindertiles % yprocs;		// How many in y dim?
+		int rowsperproc				= xtilesperproc * t;			// Translate tiles into row counts
+		int colsperproc				= ytilesperproc * t;
+
 		// Assign the rows for this process
-		if (grank < procswithextratiles) {
-			mynumrows = (tilesperproc + remaindertiles / procswithextratiles) * t;
+		if (mycoordx < xprocswithextratiles) {
+			mynumrows = (xtilesperproc + xremaindertiles / xprocswithextratiles) * t;
+		} else {
+			mynumrows = xtilesperproc * t;
 		}
-		else {
-			mynumrows = tilesperproc * t;
+
+		// Assign the columns for this process
+		if (mycoordy < yprocswithextratiles) {
+			mynumcols = (ytilesperproc + yremaindertiles / yprocswithextratiles) * t;
+		} else {
+			mynumcols = ytilesperproc * t;
 		}
-		malloc2darray(&localgrid, mynumrows, n);
+
+		malloc2darray(&localgrid, mynumrows, mynumcols);
 		if (grank == 0) {
 			for (int x = 0; x < mynumrows; x++) {
-				for (int y = 0; y < n; y++) {
+				for (int y = 0; y < mynumcols; y++) {
 					localgrid[x][y] = grid[x][y];
 				}
 			}			
-			int dest = 1;
+			int dest = -1;
+			int xdest = 0, ydest = 0, sendcols = 0;
 			int counter = 0;
-			for (int x = mynumrows; x < n; x++) {				//Send rows from master to worker processes
-				MPI_Send(&grid[x][0], n, MPI_INT, dest, 0, activecomm);
-				counter++;
-				if (dest < procswithextratiles) {
-					if (counter == mynumrows) {
-						dest++;
-						counter = 0;
+			//int colstarttile = mynumcols / t;			// How many tiles did the master send?
+			int colproc = 0, rowproc = 0;
+			int destcoords[2];
+			printf("Procs with extra rows %d, %d \n", xprocswithextratiles, yprocswithextratiles);
+
+			for (int x = 0; x < n; x++) {						//Send rows from master to worker processes
+				for (int y = 0; y < n;) {
+					int tilecolindex = y / t;			// Get the index of this tile columnwise
+					int tilerowindex = x / t;			
+
+					printf("Tile indices for [%d, %d]: %d, %d\n", x, y, tilerowindex, tilecolindex);
+					if (y < mynumcols * yprocswithextratiles) {
+						colproc = y / mynumcols;
+						sendcols = mynumcols;
+					} else {
+						colproc = (y - (mynumcols * yprocswithextratiles)) / colsperproc;
+						colproc += yprocswithextratiles;
+						sendcols = colsperproc;
 					}
-				} 
-				else if (counter == rowsperproc) {
-					dest++;
-					counter = 0;
-				}	
+					if (tilerowindex < mynumrows * xprocswithextratiles) {
+						rowproc = tilerowindex * t / mynumrows;
+					} 
+					else {
+						rowproc = (tilerowindex * t - (mynumrows * xprocswithextratiles)) / rowsperproc;
+						rowproc += xprocswithextratiles;
+					}	
+
+					destcoords[0] = rowproc;
+					destcoords[1] = colproc;
+					MPI_Cart_rank(cartcomm, destcoords, &dest);
+					printf("owner proc for tile %d,%d is: [%d, %d] = rank %d\n", tilerowindex, tilecolindex, rowproc, colproc, dest);					
+					if (dest == 0) {
+						y += sendcols;
+						continue;
+					}
+					MPI_Send(&grid[x][y], sendcols, MPI_INT, dest, 0, activecomm);
+					y += sendcols;
+				}
+				printf("\n");
 			}
 		}
 		else {
 			for (int x = 0; x < mynumrows; x++) {
-				MPI_Recv(&localgrid[x][0], n, MPI_INT, 0, 0, activecomm, MPI_STATUS_IGNORE); 
+				MPI_Recv(&localgrid[x][0], mynumcols, MPI_INT, 0, 0, activecomm, MPI_STATUS_IGNORE); 
 			}
 		}
-		int* tempbotbuffer =  (int*) malloc (n * sizeof (int));
-		int* botbuffer =  (int*) malloc (n * sizeof (int)); 
+
+		int* temprightbuffer = (int*) malloc (mynumrows * sizeof (int));
+		int* rightbuffer = (int*) malloc (mynumrows * sizeof(int));
+		int* tempbotbuffer =  (int*) malloc (mynumcols * sizeof (int));
+		int* botbuffer =  (int*) malloc (mynumcols * sizeof (int)); 
 		int src, dest;	
 
 		while (curriter < maxiters) {	
-			solveredturn(localgrid, mynumrows, n);
-			setemptycells(localgrid, mynumrows, n,  1);
+			solveredturn(localgrid, mynumrows, mynumcols);
+			setemptycells(localgrid, mynumrows, mynumcols,  1);
 			// For each process, get the row number it needs for the bottom buffer
 			// Each process sends its top row to the previous process bot row
 			for (int i = 0; i < gsize; i++) {
@@ -136,19 +213,19 @@ int main(char argc, char** argv) {
 						dest = grank - 1;
 						src = grank + 1; 
 					}
-					MPI_Sendrecv(&localgrid[0][0], n, MPI_INT, dest, 1, botbuffer, n, MPI_INT, src, 1, activecomm, MPI_STATUS_IGNORE);
+					MPI_Sendrecv(&localgrid[0][0], mynumcols, MPI_INT, dest, 1, botbuffer, mynumcols, MPI_INT, src, 1, activecomm, MPI_STATUS_IGNORE);
 				}					
 			}	
-			solveblueturn(localgrid, botbuffer, mynumrows, n);
+			solveblueturn(localgrid, botbuffer, mynumrows, mynumcols);
 			for (int i = 0; i < gsize; i++) {
 				if (grank == i) {	
 					// Flip the src and dest - send to the src and recv from the dest as we are sending the bot buffer back		
-					MPI_Sendrecv(botbuffer, n, MPI_INT, src, 2, tempbotbuffer, n, MPI_INT, dest, 2, activecomm, MPI_STATUS_IGNORE);
+					MPI_Sendrecv(botbuffer, mynumcols, MPI_INT, src, 2, tempbotbuffer, mynumcols, MPI_INT, dest, 2, activecomm, MPI_STATUS_IGNORE);
 				}
 			}
-			updatetoprow(&localgrid[0][0], tempbotbuffer,  n);
-			setemptycells(localgrid, mynumrows, n, 2);
-			setemptybuffercells(botbuffer, n, 2);
+			updatetoprow(&localgrid[0][0], tempbotbuffer,  mynumcols);
+			setemptycells(localgrid, mynumrows, mynumcols, 2);
+			setemptybuffercells(botbuffer, mynumcols, 2);
 			
 			// Now check if tiles exceed c. If not, proceed with the next iteration.
 			int tileresult 		= 0;
@@ -156,13 +233,13 @@ int main(char argc, char** argv) {
 			int allresult 		= 0;
 
 			// Get the index of the top row
-			if (grank >= procswithextratiles) {
-				toprowindex = (remaindertiles * t) + (grank * tilesperproc * t);
+			if (grank >= xprocswithextratiles) {
+				toprowindex = (xremaindertiles * t) + (grank * xtilesperproc * t);
 			}
 			else {
-				toprowindex = grank * procswithextratiles * (remaindertiles + t);
+				toprowindex = grank * xprocswithextratiles * (xremaindertiles + t);
 			}
-			tileresult = counttiles(localgrid, mynumrows, n, toprowindex, t, tilesperrow, numtiles, numtoexceedc);
+			tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, t, tilesperrow, numtiles, numtoexceedc);
 			MPI_Allreduce(&tileresult, &allresult, 1, MPI_INT, MPI_MIN, activecomm);
 			if (allresult == -1) {
 				break;
@@ -170,7 +247,7 @@ int main(char argc, char** argv) {
 			curriter++;
 		}
 		printf("Grid for process %d\n", rank);
-		print_grid(localgrid, mynumrows, n);
+		print_grid(localgrid, mynumrows, mynumcols);
 	}
 	else
 	{
@@ -196,6 +273,34 @@ int main(char argc, char** argv) {
 	printf("Execution time for p%d: %f\n", rank, elapsed);
 	MPI_Finalize();	
 }
+
+void get2dprocdimensions(int *xdim, int *ydim, int worldsize) {
+
+	for (int size = worldsize; size > 0; size--) {
+		int numfactors = 0, lastfactor = -1;
+		// Get the factors of np
+		for (int i = 1; i <= worldsize; i++) {
+			if (worldsize % i == 0) {
+				if (i * i == worldsize) {
+					*xdim = i;
+					*ydim = i;
+					return;
+				} else {
+					numfactors++;
+					if (i * lastfactor == worldsize) {
+						*xdim = i;
+						*ydim = lastfactor;
+						return;
+					}
+					lastfactor = i;
+				}
+				printf("%d ", i);
+			}
+		}
+		printf("\n");
+	}
+}
+
 		
 /* Checks the row buffer to see if any new values should be updated 
 	for the top row in this process.
