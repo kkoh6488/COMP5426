@@ -14,7 +14,7 @@ void setemptybuffercells(int *buf, int size, int color);
 int free2darray(int ***array);
 void updatetoprow(int *toprow, int *tempbuffer,  int size);
 void updateleftrow(int **localgrid, int *tempcol, int height);
-int counttiles(int **localgrid, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells);
+int counttiles(int **localgrid, int height, int width, int toprowindex, int leftcolindex, int tilesize, int tilesperrow, int numtiles, int maxcells);
 void get2dprocdimensions(int *xdim, int *ydim, int worldsize);
 
 int main(char argc, char** argv) {
@@ -180,7 +180,6 @@ int main(char argc, char** argv) {
 					MPI_Send(&grid[x][y], sendcols, MPI_INT, dest, 0, activecomm);
 					y += sendcols;
 				}
-				printf("\n");
 			}
 		}
 		else {
@@ -203,25 +202,14 @@ int main(char argc, char** argv) {
 		int right, left, top, bot;
 
 		MPI_Cart_shift(cartcomm, 1, 1, &left, &right);
-		MPI_Cart_shift(cartcomm, 0, 1, &bot, &top);
+		MPI_Cart_shift(cartcomm, 0, 1, &top, &bot);
 
 
 		// Define vector type for sending columns
 		MPI_Datatype column, coltype, redtype;
-		/*
-		MPI_Type_vector(mynumrows, 1, mynumcols, MPI_INT, &column);
-		MPI_Type_commit(&column);
-		MPI_Type_create_resized(column, 0, mynumrows*sizeof(int), &coltype);
-		MPI_Type_commit(&coltype);
 		
-		int subgridsizesred[2]	= { 1, mynumrows };
-		int startindices[2] = { 0, 0 };
-		int gridsizes[2] = { mynumrows, mynumcols };
-		MPI_Type_create_subarray(2, gridsizes, subgridsizesred, startindices, MPI_ORDER_C, MPI_INT, &redtype);
-		MPI_Type_create_resized(redtype, 0, mynumrows * sizeof(int), &column);
-		MPI_Type_commit(&column);
-		*/
 		//printf("left and right procs for %d are: %d, %d\n", grank, left, right);
+		//printf("top and bot procs for %d are: %d, %d\n", grank, top, bot);
 
 		while (curriter < maxiters) {	
 
@@ -276,18 +264,10 @@ int main(char argc, char** argv) {
 			int allresult 		= 0;
 
 			// Get the index of the top row
-			if (grank >= xprocswithextratiles) {
-				toprowindex = (xremaindertiles * t) + (grank * xtilesperproc * t);
-			}
-			else {
-				toprowindex = grank * xprocswithextratiles * (xremaindertiles + t);
-			}
-			if (grank >= yprocswithextratiles) {
-
-			} else {
-
-			}
-			tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, t, tilesperrow, numtiles, numtoexceedc);
+			toprowindex = (mycoordx + xprocswithextratiles) * rowsperproc;
+			leftcolindex = (mycoordy + yprocswithextratiles) * colsperproc;
+			//printf("Start row and col for p%d = %d, %d \n", grank, toprowindex, leftcolindex);
+			//tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, leftcolindex, t, tilesperrow, numtiles, numtoexceedc);
 			MPI_Allreduce(&tileresult, &allresult, 1, MPI_INT, MPI_MIN, activecomm);
 			if (allresult == -1) {
 				break;
@@ -296,6 +276,7 @@ int main(char argc, char** argv) {
 		}
 		printf("Grid for process %d\n", rank);
 		print_grid(localgrid, mynumrows, mynumcols);
+		printf("\n");
 	}
 	else
 	{
@@ -308,7 +289,7 @@ int main(char argc, char** argv) {
 			setemptycells(grid, n, n, 1);
 			solveblueturn(grid, NULL, n, n);
 			setemptycells(grid, n, n, 2);
-			if (counttiles(grid, n, n, 0, t, tilesperrow, numtiles, numtoexceedc) == -1) {
+			if (counttiles(grid, n, n, 0, 0, t, tilesperrow, numtiles, numtoexceedc) == -1) {
 				break;
 			}
 			curriter++;	
@@ -370,7 +351,7 @@ void updateleftrow(int **localgrid, int *tempcol, int height) {
 } 
 
 /* Counts the number of cells in each tile, checking if it exceeds the threshold. */
-int counttiles(int **localgrid, int height, int width, int toprowindex, int tilesize, int tilesperrow, int numtiles, int maxcells) {
+int counttiles(int **localgrid, int height, int width, int toprowindex, int leftcolindex, int tilesize, int tilesperrow, int numtiles, int maxcells) {
 	
 	int* numred				= malloc (numtiles * sizeof(int));
 	int* numblue			= malloc (numtiles * sizeof(int));
@@ -384,7 +365,9 @@ int counttiles(int **localgrid, int height, int width, int toprowindex, int tile
 	for (int x = 0; x < height; x++) {
 		int rowindex = toprowindex + x;
 		for (int y = 0; y < width; y++) {
-			int tilenum = (rowindex / tilesize) *  tilesperrow + (y / tilesize);
+			int colindex = leftcolindex + y;
+			int tilenum = (rowindex / tilesize) *  tilesperrow + (colindex / tilesize);
+			printf("t[%d]", tilenum);
 			if (localgrid[x][y] == 1) {
 				numred[tilenum]++;
 			}
@@ -398,6 +381,7 @@ int counttiles(int **localgrid, int height, int width, int toprowindex, int tile
 				} 
 			}
 		}
+		printf("\n");
 	}
 	return result;
 }
