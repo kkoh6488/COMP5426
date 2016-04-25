@@ -12,7 +12,7 @@ void *PrintHello(void *threadid) {
 }
 
 int* primes;
-int n, base, numthreads;
+int n, base;
 
 void set_bit(int* n, int index) {
 	int arrind = index / 32;
@@ -46,69 +46,31 @@ int get_bit(int* n, int index) {
 
 
 /* Mark all odd multiples of base */
-void mark_multiples(int k, int arraystart, int arrayend) {
-	//int start = k;
-	// Find the first multiple of k in this section of the array
-	
-	/*
-	int start;
-	for (int i = arraystart; i < arrayend; i++) {
-		if (i % k == 0) {
-			start = i;
-			break;
-		}
-	}
-	printf("Starting from %d for k = %d\n", start, k);
-	*/
-
-	// Use integer division to get the last previous multiple
-	//int start = ((arraystart / k) + 1) * 2;		
-	int start = k * k;
-	if (start > arrayend) {
-		return;
-	}
-	printf("Starting from %d for k = %d \n", start, k * k);	
-	for (int i = start; i <= arrayend; i += k) {
+void mark_multiples(int k) {
+	int start = k * 2;
+	for (int i = start; i < n; i += k) {
 		set_bit(primes, i);
 		//printf("%d ", i);
 	}
 	//printf("\n");
 }
 
-void *worker(void* t) {
-	int tid = (int) t;
-	int start = 3;
-
-	// Get the array bounds this thread is responsible for
-	int arraystart = n / numthreads * tid;
-	if (arraystart < 3) {
-		arraystart = 3;
-	} //else if (arraystart % 2 == 0) {
-		//arraystart += 1;
-	//}
-	int arrayend = n / numthreads * (tid + 1);
-	if (arrayend > n) {
-		arrayend = n;
-	}
-	printf("Start and End is %d, %d. t is %d\n", arraystart, arrayend, t);
-	printf("Starting k = %d\n", start);
-	for (int i = start; i <= n; i += 2) {
-		if (i > arrayend) {
-			break;
-		}
+void *worker(int start) {
+	printf("Start is %d, n is %d\n", start, n);
+	for (int i = start; i < n; i += 2) {
 		if (get_bit(primes, i) == 0) {
 			//set_bit(primes, i);
-			mark_multiples(i, arraystart, arrayend);
+			mark_multiples(i);
 		}
 	}
-	printf("Thread %d done\n", tid);
+	printf("Thread done\n");
 	pthread_exit(NULL);
 }
 
 
 int main (int argc, char **argv) {
 	n 				= strtol(argv[1], NULL, 10);
-	numthreads 	= strtol(argv[2], NULL, 10);
+	int numthreads 	= strtol(argv[2], NULL, 10);
 	clock_t start, end;
 	double elapsed;	
 
@@ -129,7 +91,7 @@ int main (int argc, char **argv) {
 	void *status;
 	for (t = 0; t < numthreads; t++) {
 		printf("Started thread %d \n", t);
-		rc = pthread_create(&threads[t], NULL, worker, (void *) t);
+		rc = pthread_create(&threads[t], NULL, worker, (void *) base);
 		if (rc) {
 			printf("ERROR; return code from pthread_create() is %d \n", rc);
 			exit(-1);
@@ -141,7 +103,7 @@ int main (int argc, char **argv) {
 
 	// Include 2 manually, since we don't check even numbers
 	printf("Primes less than %d are: 2 ", n);
-	for (int i = 3; i <= n; i += 2) {
+	for (int i = 3; i < n; i += 2) {
 		if (get_bit(primes, i) == 0) {
 			printf("%d ", i);
 		}
