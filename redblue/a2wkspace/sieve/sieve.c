@@ -47,57 +47,55 @@ int get_bit(int* n, int index) {
 
 /* Mark all odd multiples of base */
 void mark_multiples(int k, int arraystart, int arrayend) {
-	//int start = k;
-	// Find the first multiple of k in this section of the array
-	
-	/*
-	int start;
-	for (int i = arraystart; i < arrayend; i++) {
-		if (i % k == 0) {
-			start = i;
-			break;
-		}
-	}
-	printf("Starting from %d for k = %d\n", start, k);
-	*/
+	int startnum = arraystart / k;
+	startnum = startnum * k;
 
-	// Use integer division to get the last previous multiple
-	//int start = ((arraystart / k) + 1) * 2;		
-	int start = k * k;
-	if (start > arrayend) {
+	// If this thread is marking the first occurrence (eg 5, 7), start from k * k
+	// Both conditions are for checking if this is the first occurrence.
+	if (k == startnum || startnum == 0) {
+		startnum = k * k;
+	}
+	
+	// Don't need to check if k * k is out of our range or larger than n,
+	// as we know previous primes have been checked.
+	if (startnum > arrayend || k * k > n) {
 		return;
 	}
-	printf("Starting from %d for k = %d \n", start, k * k);	
-	for (int i = start; i <= arrayend; i += k) {
+
+	printf("Startnum and k are: %d, %d \n", startnum, k);
+	for (int i = startnum; i <= arrayend; i += k) {
 		set_bit(primes, i);
-		//printf("%d ", i);
+		printf("%d ", i);
 	}
-	//printf("\n");
+	printf("\n");
 }
 
 void *worker(void* t) {
 	int tid = (int) t;
 	int start = 3;
 
+	int remaining = n % ((n / numthreads) * numthreads);
+	printf("Remainder = %d \n", remaining);
+
 	// Get the array bounds this thread is responsible for
 	int arraystart = n / numthreads * tid;
 	if (arraystart < 3) {
 		arraystart = 3;
-	} //else if (arraystart % 2 == 0) {
-		//arraystart += 1;
-	//}
+	}
 	int arrayend = n / numthreads * (tid + 1);
 	if (arrayend > n) {
 		arrayend = n;
 	}
+	// Give the last thread the remainder numbers
+	if (tid == numthreads - 1) {
+		arrayend += remaining;
+	}
 	printf("Start and End is %d, %d. t is %d\n", arraystart, arrayend, t);
-	printf("Starting k = %d\n", start);
 	for (int i = start; i <= n; i += 2) {
 		if (i > arrayend) {
 			break;
 		}
 		if (get_bit(primes, i) == 0) {
-			//set_bit(primes, i);
 			mark_multiples(i, arraystart, arrayend);
 		}
 	}
@@ -139,7 +137,8 @@ int main (int argc, char **argv) {
 		rc = pthread_join(threads[i], &status);
 	}
 
-	// Include 2 manually, since we don't check even numbers
+	// Include 2 manually, since we don't check even numbers. By initialising at 3
+	// and incrementing 2, we can halve the number of checks.
 	printf("Primes less than %d are: 2 ", n);
 	for (int i = 3; i <= n; i += 2) {
 		if (get_bit(primes, i) == 0) {
