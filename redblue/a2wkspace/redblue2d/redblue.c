@@ -14,7 +14,7 @@ void setemptybuffercells(int *buf, int size, int color);
 int free2darray(int ***array);
 void updatetoprow(int *toprow, int *tempbuffer,  int size);
 void updateleftrow(int **localgrid, int *tempcol, int height);
-int counttiles(int **localgrid, int height, int width, int toprowindex, int leftcolindex, int tilesize, int tilesperrow, int numtiles, int maxcells);
+int counttiles(int **localgrid, int height, int width, int toprowindex, int leftcolindex, int tilesize, int tiledimension, int numtiles, int maxcells);
 void get2dprocdimensions(int *xdim, int *ydim, int worldsize);
 
 int main(char argc, char** argv) {
@@ -36,8 +36,8 @@ int main(char argc, char** argv) {
 	int **grid;											// Master grid
 	int **localgrid;									// For storing local grids
 	int numtoexceedc	= (int)(t * t * c + 1);			// Cells to exceed the threshold
-	int tilesperrow 	= n / t;
-	int numtiles		= tilesperrow * tilesperrow;
+	int tiledimension 	= n / t;
+	int numtiles		= tiledimension * tiledimension;
 	clock_t start, end;
 	double elapsed;	
 	
@@ -49,52 +49,57 @@ int main(char argc, char** argv) {
 	}
 	
 	start = clock();
+	// If we need to use multiple processes
 	if (worldsize > 1 && t != n) {
-		int mynumrows, mynumcols, xremaindertiles, yremaindertiles;
+		int mynumrows, mynumcols, rowtilesremainder, coltilesremainder;
 
 		// Max number of processes in each dimension
-		int maxprocs = tilesperrow;
+		int maxprocs = tiledimension;
 
 		// Get the size of the 2D torus in each dimension
-		int xprocs, yprocs;
-		xprocs = yprocs = 0;
-		get2dprocdimensions(&xprocs, &yprocs, worldsize);
+		int cartcols, cartrows;
+		cartcols = cartrows = 0;
+		get2dprocdimensions(&cartrows, &cartcols, worldsize);
 
 		// If the number of processes in x or y > number of tiles, limit the dimension.
-		if (xprocs > maxprocs) {
-			xprocs = maxprocs;
+		if (cartcols > maxprocs) {
+			cartcols = maxprocs;
 		}
-		if (yprocs > maxprocs) {
-			yprocs = maxprocs;
+		if (cartrows > maxprocs) {
+			cartrows = maxprocs;
 		}
+		// Set number of rows as greater - prefer sending longer rows, rather than more columns
+		if (cartrows)
+
 		if (rank == 0) {
-			printf("Sizes are: %d, %d. Max is %d\n", xprocs, yprocs, maxprocs);
+			printf("Sizes are: %d, %d. Max is %d\n", cartrows, cartcols, maxprocs);
 		}
 
-		if (worldsize > tilesperrow * tilesperrow) {
-			xremaindertiles = yremaindertiles = 0;
+		if (worldsize > tiledimension * tiledimension) {
+			rowtilesremainder = coltilesremainder = 0;
 		}
 		else {
-			xremaindertiles = tilesperrow % xprocs;
-			yremaindertiles = tilesperrow % yprocs;
+			rowtilesremainder = tiledimension % cartrows;
+			coltilesremainder = tiledimension % cartcols;
 		}
-		
+
 		// Make the active process communicator
 		MPI_Comm activecomm;
-		int color = rank / (xprocs * yprocs);
+		int color = rank / (cartcols * cartrows);
 		MPI_Comm_split(MPI_COMM_WORLD, color, rank, &activecomm);
 
-		if (rank >= xprocs * yprocs) {							// Quit if the process isn't needed
+		if (rank >= cartcols * cartrows) {							// Quit if the process isn't needed
 			printf("Unused process %d, exiting...\n", rank);
 			MPI_Finalize();
 			exit(0);
 		}
 		
-		// Make the 2D torus topology
+		// Make the 2D torus topology - 
 		MPI_Comm cartcomm;
-		int dims[2] 	= { xprocs, yprocs };
+		int dims[2] 	= { cartrows, cartcols };
 		int period[2] 	= { 1, 1 };
 		int reorder 	= 0;
+		//printf("Cart create [%d][%d]\n", cartrows, cartcols);
 		MPI_Cart_create(activecomm, 2, dims, period, reorder, &cartcomm);
 		
 		int grank, gsize;
@@ -103,34 +108,37 @@ int main(char argc, char** argv) {
 		MPI_Comm_rank(cartcomm, &grank);
 		MPI_Comm_size(cartcomm, &gsize);
 		MPI_Cart_coords(cartcomm, grank, 2, mycoords);
-		//printf("mycoords for rank %d: %d, %d\n", grank, mycoords[0], mycoords[1]);
 		int mycoordx = mycoords[0];
 		int mycoordy = mycoords[1];
 		
-		int xtilesperproc			= tilesperrow / xprocs;			// How many tiles per proc in x dimension?
-		int ytilesperproc			= tilesperrow / yprocs;
+		int coltilesperproc			= tiledimension / cartcols;			// How many tiles per proc in x dimension?
+		int rowtilesperproc			= tiledimension / cartrows;
 
-		int xprocswithextratiles 	= xremaindertiles % xprocs;		// How many processes get extra tiles in x dim?
-		int yprocswithextratiles 	= yremaindertiles % yprocs;		// How many in y dim?
-		int rowsperproc				= xtilesperproc * t;			// Translate tiles into row counts
-		int colsperproc				= ytilesperproc * t;
+		int rowprocswithextratiles 	= rowtilesremainder % cartcols;		// How many processes get extra row tiles?
+		int colprocswithextratiles 	= coltilesremainder % cartrows;		// How many extra column tiles?
+		int rowsperproc				= rowtilesperproc * t;			// Translate tiles into row counts
+		int colsperproc				= coltilesperproc * t;
 
+		printf("mycoords x y for rank %d: %d, %d\n", grank, mycoords[0], mycoords[1]);
+		//printf("rowprocswithextratiles: %d, colprocswithextratiles: %d\n", rowprocswithextratiles, colprocswithextratiles);
 		// Assign the rows for this process
-		if (mycoordx < xprocswithextratiles) {
-			mynumrows = (xtilesperproc + xremaindertiles / xprocswithextratiles) * t;
+		if (mycoordx < rowprocswithextratiles) {
+			mynumrows = rowsperproc * 2;
 		} else {
-			mynumrows = xtilesperproc * t;
+			mynumrows = rowsperproc;
 		}
 
 		// Assign the columns for this process
-		if (mycoordy < yprocswithextratiles) {
-			mynumcols = (ytilesperproc + yremaindertiles / yprocswithextratiles) * t;
+		if (mycoordy < colprocswithextratiles) {
+			mynumcols = colsperproc * 2;
 		} else {
-			mynumcols = ytilesperproc * t;
+			mynumcols = colsperproc;
 		}
 
+		printf("%d My num rows, cols = %d, %d; colsperproc = %d, rowsperproc = %d\n", grank, mynumrows, mynumcols, colsperproc, rowsperproc);
 		malloc2darray(&localgrid, mynumrows, mynumcols);
 		if (grank == 0) {
+			//printf("Remainders = %d, %d\n", rowtilesremainder, coltilesremainder);
 			for (int x = 0; x < mynumrows; x++) {
 				for (int y = 0; y < mynumcols; y++) {
 					localgrid[x][y] = grid[x][y];
@@ -142,7 +150,7 @@ int main(char argc, char** argv) {
 			//int colstarttile = mynumcols / t;			// How many tiles did the master send?
 			int colproc = 0, rowproc = 0;
 			int destcoords[2];
-			//printf("Procs with extra rows %d, %d \n", xprocswithextratiles, yprocswithextratiles);
+			//printf("Procs with extra rows %d, %d \n", rowprocswithextratiles, colprocswithextratiles);
 
 			for (int x = 0; x < n; x++) {						//Send rows from master to worker processes
 				for (int y = 0; y < n;) {
@@ -150,26 +158,31 @@ int main(char argc, char** argv) {
 					int tilerowindex = x / t;			
 
 					//printf("Tile indices for [%d, %d]: %d, %d\n", x, y, tilerowindex, tilecolindex);
-					if (y < mynumcols * yprocswithextratiles) {
+					//printf("colsperproc = %d, y %d has extra cols?: %d\n", colsperproc, y, mynumcols * colprocswithextratiles);
+					if (y < mynumcols * colprocswithextratiles) {
 						colproc = y / mynumcols;
 						sendcols = mynumcols;
 					} else {
-						colproc = (y - (mynumcols * yprocswithextratiles)) / colsperproc;
-						colproc += yprocswithextratiles;
+						colproc = (y - (mynumcols * colprocswithextratiles)) / colsperproc;
+						colproc += colprocswithextratiles;
 						sendcols = colsperproc;
 					}
-					if (tilerowindex < mynumrows * xprocswithextratiles) {
+					printf("Tile row index : %d\n", tilerowindex);
+					if (tilerowindex < rowprocswithextratiles) {
 						rowproc = tilerowindex * t / mynumrows;
 					} 
 					else {
-						rowproc = (tilerowindex * t - (mynumrows * xprocswithextratiles)) / rowsperproc;
-						rowproc += xprocswithextratiles;
+						rowproc = (tilerowindex * t - (mynumrows * rowprocswithextratiles)) / rowsperproc;
+						rowproc += rowprocswithextratiles;
 					}	
 
 					destcoords[0] = rowproc;
 					destcoords[1] = colproc;
 					MPI_Cart_rank(cartcomm, destcoords, &dest);
+					printf("Sending col from %d to %d to rank %d, at [%d][%d]\n", y, sendcols, dest, destcoords[0], destcoords[1]);
 					//printf("owner proc for tile %d,%d is: [%d, %d] = rank %d\n", tilerowindex, tilecolindex, rowproc, colproc, dest);					
+					
+					// If the destination is the master process - skip, as it already has its own subgrid.
 					if (dest == 0) {
 						y += sendcols;
 						continue;
@@ -181,10 +194,12 @@ int main(char argc, char** argv) {
 		}
 		else {
 			for (int x = 0; x < mynumrows; x++) {
+				//printf("Waiting to recv @ proc %d\n", grank);
 				MPI_Recv(&localgrid[x][0], mynumcols, MPI_INT, 0, 0, activecomm, MPI_STATUS_IGNORE); 
 			}
 		}
 
+		printf("Sent and received rows %d\n", grank);
 		// For storing columns into rows for red turn
 		int* rightcolbuffer = malloc (mynumrows * sizeof (int));
 		int* templeftbuffer = malloc (mynumrows * sizeof (int));
@@ -200,9 +215,6 @@ int main(char argc, char** argv) {
 
 		MPI_Cart_shift(cartcomm, 1, 1, &left, &right);
 		MPI_Cart_shift(cartcomm, 0, 1, &top, &bot);
-
-		// Define vector type for sending columns
-		MPI_Datatype column, coltype, redtype;
 		
 		//printf("left and right procs for %d are: %d, %d\n", grank, left, right);
 		//printf("top and bot procs for %d are: %d, %d\n", grank, top, bot);
@@ -260,10 +272,10 @@ int main(char argc, char** argv) {
 			int allresult 		= 0;
 
 			// Get the index of the top row
-			toprowindex = (mycoordx + xprocswithextratiles) * rowsperproc;
-			leftcolindex = (mycoordy + yprocswithextratiles) * colsperproc;
+			toprowindex = (mycoordx + rowprocswithextratiles) * rowsperproc;
+			leftcolindex = (mycoordy + colprocswithextratiles) * colsperproc;
 			//printf("Start row and col for p%d = %d, %d \n", grank, toprowindex, leftcolindex);
-			tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, leftcolindex, t, tilesperrow, numtiles, numtoexceedc);
+			tileresult = counttiles(localgrid, mynumrows, mynumcols, toprowindex, leftcolindex, t, tiledimension, numtiles, numtoexceedc);
 			MPI_Allreduce(&tileresult, &allresult, 1, MPI_INT, MPI_MIN, activecomm);
 			if (allresult == -1) {
 				break;
@@ -285,7 +297,7 @@ int main(char argc, char** argv) {
 			setemptycells(grid, n, n, 1);
 			solveblueturn(grid, NULL, n, n);
 			setemptycells(grid, n, n, 2);
-			if (counttiles(grid, n, n, 0, 0, t, tilesperrow, numtiles, numtoexceedc) == -1) {
+			if (counttiles(grid, n, n, 0, 0, t, tiledimension, numtiles, numtoexceedc) == -1) {
 				break;
 			}
 			curriter++;	
@@ -299,29 +311,38 @@ int main(char argc, char** argv) {
 	MPI_Finalize();	
 }
 
+/* 
+Gets the dimensions for the 2D torus, based on the number of processes (np). 
+If np is a square number, use those dimensions.
+Otherwise, find an x and y which equals np.
+*/
 void get2dprocdimensions(int *xdim, int *ydim, int worldsize) {
 	for (int size = worldsize; size > 0; size--) {
-		int numfactors = 0, lastfactor = -1;
+		//printf("size is %d\n", size);
+		int lastfactor = -1;
+		int numfactors = 0;
 		// Get the factors of np
-		for (int i = 1; i <= worldsize; i++) {
-			if (worldsize % i == 0) {
-				if (i * i == worldsize) {
+		for (int i = 1; i <= size; i++) {
+			// If i is a factor of size
+			//printf("%d ", i);
+			if (size % i == 0) {
+				numfactors++;
+				if (i * i == size) {
 					*xdim = i;
 					*ydim = i;
 					return;
 				} else {
-					numfactors++;
-					if (i * lastfactor == worldsize) {
+					// If it's prime, we want to avoid having Nx1 grid, unless there's only 2 processes.
+					if (i * lastfactor == size && (numfactors != 2 || size == 2)) {
 						*xdim = i;
 						*ydim = lastfactor;
 						return;
 					}
 					lastfactor = i;
 				}
-				printf("%d ", i);
 			}
 		}
-		printf("\n");
+		//printf("\n");
 	}
 }
 
@@ -347,7 +368,7 @@ void updateleftrow(int **localgrid, int *tempcol, int height) {
 } 
 
 /* Counts the number of cells in each tile, checking if it exceeds the threshold. */
-int counttiles(int **localgrid, int height, int width, int toprowindex, int leftcolindex, int tilesize, int tilesperrow, int numtiles, int maxcells) {
+int counttiles(int **localgrid, int height, int width, int toprowindex, int leftcolindex, int tilesize, int tiledimension, int numtiles, int maxcells) {
 	
 	int* numred				= malloc (numtiles * sizeof(int));
 	int* numblue			= malloc (numtiles * sizeof(int));
@@ -362,7 +383,7 @@ int counttiles(int **localgrid, int height, int width, int toprowindex, int left
 		int rowindex = toprowindex + x;
 		for (int y = 0; y < width; y++) {
 			int colindex = leftcolindex + y;
-			int tilenum = (rowindex / tilesize) *  tilesperrow + (colindex / tilesize);
+			int tilenum = (rowindex / tilesize) *  tiledimension + (colindex / tilesize);
 			//printf("t[%d]", tilenum);
 			if (localgrid[x][y] == 1) {
 				numred[tilenum]++;
@@ -449,8 +470,8 @@ void  board_init(int** grid, int size) {
 			else {
 				grid[x][y] = 2;
 			}
-			printf("%d", grid[x][y]); 
+			//printf("%d", grid[x][y]); 
 		}
-		printf("\n");							
+		//printf("\n");							
 	}			
 }
