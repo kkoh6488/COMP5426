@@ -46,6 +46,7 @@ int main(char argc, char** argv) {
 	if (rank == 0) {
 		printf("Initializing board of size %d with tile size %d, threshold %f and max iterations %d, num to exceed %d \n", n, t, c, maxiters, numtoexceedc);
 		board_init(grid, n);		
+		print_grid(grid, n, n);
 	}
 	
 	start = clock();
@@ -119,7 +120,7 @@ int main(char argc, char** argv) {
 		int rowsperproc				= rowtilesperproc * t;			// Translate tiles into row counts
 		int colsperproc				= coltilesperproc * t;
 
-		printf("mycoords x y for rank %d: %d, %d\n", grank, mycoords[0], mycoords[1]);
+		//printf("mycoords x y for rank %d: %d, %d\n", grank, mycoords[0], mycoords[1]);
 		//printf("rowprocswithextratiles: %d, colprocswithextratiles: %d\n", rowprocswithextratiles, colprocswithextratiles);
 		// Assign the rows for this process
 		if (mycoordx < rowprocswithextratiles) {
@@ -135,7 +136,7 @@ int main(char argc, char** argv) {
 			mynumcols = colsperproc;
 		}
 
-		printf("%d My num rows, cols = %d, %d; colsperproc = %d, rowsperproc = %d\n", grank, mynumrows, mynumcols, colsperproc, rowsperproc);
+		//printf("%d My num rows, cols = %d, %d; colsperproc = %d, rowsperproc = %d\n", grank, mynumrows, mynumcols, colsperproc, rowsperproc);
 		malloc2darray(&localgrid, mynumrows, mynumcols);
 		if (grank == 0) {
 			//printf("Remainders = %d, %d\n", rowtilesremainder, coltilesremainder);
@@ -167,7 +168,7 @@ int main(char argc, char** argv) {
 						colproc += colprocswithextratiles;
 						sendcols = colsperproc;
 					}
-					printf("Tile row index : %d\n", tilerowindex);
+					//printf("Tile row index : %d\n", tilerowindex);
 					if (tilerowindex < rowprocswithextratiles) {
 						rowproc = tilerowindex * t / mynumrows;
 					} 
@@ -179,7 +180,7 @@ int main(char argc, char** argv) {
 					destcoords[0] = rowproc;
 					destcoords[1] = colproc;
 					MPI_Cart_rank(cartcomm, destcoords, &dest);
-					printf("Sending col from %d to %d to rank %d, at [%d][%d]\n", y, sendcols, dest, destcoords[0], destcoords[1]);
+					//printf("Sending col from %d to %d to rank %d, at [%d][%d]\n", y, sendcols, dest, destcoords[0], destcoords[1]);
 					//printf("owner proc for tile %d,%d is: [%d, %d] = rank %d\n", tilerowindex, tilecolindex, rowproc, colproc, dest);					
 					
 					// If the destination is the master process - skip, as it already has its own subgrid.
@@ -199,7 +200,7 @@ int main(char argc, char** argv) {
 			}
 		}
 
-		printf("Sent and received rows %d\n", grank);
+		//printf("Sent and received rows %d\n", grank);
 		// For storing columns into rows for red turn
 		int* rightcolbuffer = malloc (mynumrows * sizeof (int));
 		int* templeftbuffer = malloc (mynumrows * sizeof (int));
